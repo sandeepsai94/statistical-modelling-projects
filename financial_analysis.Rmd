@@ -1,0 +1,371 @@
+---
+title: "Creating Datasets for Financial Analysis of SP500 Companies"
+author: "Sai Sandeep Chandaluri"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+---
+
+
+## **Question**
+
+Create an annual data set of earnings, cash flows, and leverage ratios (FD/TA, market and book-based), as available to investors for sure in December of the year. Note that a firm that closes its financials in December 2012 usually won't release these financials until March 2013. 
+
+## **Executive Summary**
+
+CRSP maintains large datasets with information about stocks and bonds. Whenever a dataset is created from CRSP, it is vital to understand all the summary statistics of the dataset before conclusions are drawn based on results derived from the data. The current exercise attempts to understand the financial data dataset properly before it is put to use. We have considered a 52-year data from 1969 to 2020 that consists of information about Earnings, Cashflows and Leverage Ratios (both book-based and market-based) for about 30045 stocks.  
+
+## **Computation Methodology**
+
+**1. Choosing the right data:** 
+
+The following is the path of data on WRDS: Compustat - Capital IQ -> Compustat -> North America - Daily -> Compustat Daily Updates - Fundamentals Annual
+
+**2. Data Transformation:**
+
+The given data is cropped to consider only for the time frame from 1969 to 2020 and data with insufficient information are ignored. The data is divided into separate stocks based on Global Key Number. Relevant columns needed for leverage ratios are computed.  
+
+**3. Results:**
+
+Dataset taken is explained by the following:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+library(data.table)
+library(tidyverse)
+library(magrittr)
+library(xts)
+library(dplyr)
+library(prettydoc)
+library(lubridate)
+library(xtable)
+library(kableExtra)
+library(readxl)
+options(xtable.comment = FALSE)
+
+#Reading the data
+stockdata = read_excel('~/Documents/Documents/Decision Making/hw4data.xlsx')
+
+#Get only relevant data and compute required columns for leverage ratios
+stockdata <- as.data.table(stockdata)
+stockdata[, `Data Date`:=as.Date(as.character(`Data Date`), format = "%Y-%m-%d")]
+stockdata <- stockdata[complete.cases(stockdata[ , c(13,14,20,21,22)]),]
+
+stockdata <- stockdata %>% mutate(Debt_Equity = stockdata$`Liabilities - Total`/stockdata$`Stockholders Equity - Total`)
+stockdata <- stockdata %>% mutate(Debt_Assets = stockdata$`Liabilities - Total`/stockdata$`Assets - Total`)
+stockdata <- stockdata %>% mutate(Debt_Capital = stockdata$`Liabilities - Total`/(stockdata$`Assets - Total` + stockdata$`Stockholders Equity - Total`))
+stockdata <- stockdata %>% mutate(Assets_Equity = stockdata$`Assets - Total`/stockdata$`Stockholders Equity - Total`)
+stockdata <- stockdata %>% mutate(Debt_Equity_Market = stockdata$`Liabilities - Total`/stockdata$`Market Value - Total - Fiscal`)
+stockdata <- stockdata %>% mutate(Debt_Capital_Market = stockdata$`Liabilities - Total`/(stockdata$`Assets - Total`+ stockdata$`Market Value - Total - Fiscal`))
+stockdata <- stockdata %>% mutate(Assets_Equity_Market = stockdata$`Assets - Total`/stockdata$`Market Value - Total - Fiscal`)
+  
+#Make a list of dataframes, each dataframe indicating the information of a single stock - each stock differentiated by Company Key. 
+
+listdata <- list()
+
+for (i in 1:length(unique(stockdata$`Global Company Key`))) {
+  listdata[[i]] <- stockdata[stockdata$`Global Company Key` == unique(stockdata$`Global Company Key`)[i],]
+}
+
+
+#Compute the count of positive/negative net income each year for every stock
+profitdata <- list()
+
+for (i in 1:length(listdata)){
+  profitdata[[i]] <- xts(listdata[[i]]$`Net Income (Loss)`, as.Date(listdata[[i]]$`Data Date`))
+}
+
+profit_positive <- matrix(0, length(profitdata) , 52)
+profit_negative <- matrix(0, length(profitdata) , 52)
+profit_neutral <- matrix(0, length(profitdata) , 52)
+
+for (i in 1:length(profitdata)){
+  for (j in 1: length(year(index(profitdata[[i]])))){
+    k <- as.numeric(profitdata[[i]][j])
+    if(!is.na(k) && k > 0){
+    profit_positive[i,year(index(profitdata[[i]][j]))-1968] =  profit_positive[i,year(index(profitdata[[i]][j]))-1968] + 1
+    }  else if(!is.na(k) && k < 0){
+    profit_negative[i,year(index(profitdata[[i]][j]))-1968] =  profit_negative[i,year(index(profitdata[[i]][j]))-1968] + 1
+    } else {
+    profit_neutral[i,year(index(profitdata[[i]][j]))-1968] =  profit_neutral[i,year(index(profitdata[[i]][j]))-1968] + 1  
+    }
+}
+}
+```
+
+The following table describes some of the summary statistics based on the dataset:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+
+#Total number of stocks in CRSP dataset under consideration in the last 52 years
+stocks <- length(listdata)
+years <- "1969 - 2020"
+
+#Highest ever cashflows in a particular year by a particular company
+highest_inv <- max(abs(stockdata$`Investing Activities - Net Cash Flow`), na.rm = TRUE)
+highest_inv_company <- stockdata[which.max(abs(stockdata$`Investing Activities - Net Cash Flow`))]$`Ticker Symbol`
+highest_inv_year <- stockdata[which.max(abs(stockdata$`Investing Activities - Net Cash Flow`))]$`Data Year - Fiscal`
+highest_oper <- max(stockdata$`Operating Activities - Net Cash Flow`, na.rm = TRUE)
+highest_oper_company <- stockdata[which.max(stockdata$`Operating Activities - Net Cash Flow`)]$`Ticker Symbol`
+highest_oper_year <- stockdata[which.max(stockdata$`Operating Activities - Net Cash Flow`)]$`Data Year - Fiscal`
+highest_fin <- max(abs(stockdata$`Financing Activities - Net Cash Flow`), na.rm = TRUE)
+highest_fin_company <- stockdata[which.max(abs(stockdata$`Financing Activities - Net Cash Flow`))]$`Ticker Symbol`
+highest_fin_year <- stockdata[which.max(abs(stockdata$`Financing Activities - Net Cash Flow`))]$`Data Year - Fiscal`
+
+#Highest market-book value ratio (Growth Expectation or any other reason)
+maxratio <- stockdata[is.finite(stockdata$`Market Value - Total - Fiscal`/(stockdata$`Assets - Total` - stockdata$`Liabilities - Total`))]
+maxratio_ratio <- max(maxratio$`Market Value - Total - Fiscal`/ (maxratio$`Assets - Total` - maxratio$`Liabilities - Total`))
+maxratio_year <- maxratio[which.max((maxratio$`Market Value - Total - Fiscal`/ (maxratio$`Assets - Total` - maxratio$`Liabilities - Total`)))]$`Data Year - Fiscal`
+maxratio_company <- maxratio[which.max((maxratio$`Market Value - Total - Fiscal`/ (maxratio$`Assets - Total` - maxratio$`Liabilities - Total`)))]$`Ticker Symbol`
+
+res = matrix(NA, nrow = 6, ncol = 1)
+colnames(res) = c("Summary Statistics")
+rownames(res)= c("Number of Stocks", "Years considered", "Highest ever CF in Investing in an year", "Highest ever CF in Financing in an year", "Highest ever CF in Operating in an year", "Highest market-book value ratio (Growth Expectation)")
+
+res[1,1] <- stocks
+res[2,1] <- "1969-2020"
+res[3,1] <- paste0(highest_inv, " million USD in ", highest_inv_year, " by NYSE: ", highest_inv_company )
+res[4,1] <- paste0(highest_fin, " million USD in ", highest_fin_year, " by NYSE: ", highest_fin_company )
+res[5,1] <- paste0(highest_oper, " million USD in ", highest_oper_year, " by NYSE: ", highest_oper_company )
+res[6,1] <- paste0(round(maxratio_ratio, digits = 0), " for ", maxratio_company, " in ", maxratio_year)
+
+
+kable(res, format = "markdown")
+```
+
+The following plots describe the percentage of stocks that have positive net income and negative net income each year, out of the stocks in the dataset taken.
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+#Percentage of number of stocks having positive and negative Net Income each year
+
+stats <- data.frame("Year"= 1969:2020, "Number of Stocks with Positive Net Income" = 0, "Number of Stocks with Negative Net Income"=0, "Zero Income Stocks" = 0)
+for (i in 1:52) {
+  stats$Number.of.Stocks.with.Positive.Net.Income[i] <- sum(profit_positive[,i])
+  stats$Number.of.Stocks.with.Negative.Net.Income[i] <- sum(profit_negative[,i])
+  stats$Zero.Income.Stocks[i] <- sum(profit_neutral[,i])
+  stats$Total[i] <- sum(stats$Number.of.Stocks.with.Positive.Net.Income[i], stats$Number.of.Stocks.with.Negative.Net.Income[i], stats$Zero.Income.Stocks[i])
+  stats$Percent_Positive[i] <- 100 * stats$Number.of.Stocks.with.Positive.Net.Income[i]/stats$Total[i]
+  stats$Percent_Negative[i] <- 100 * stats$Number.of.Stocks.with.Negative.Net.Income[i]/stats$Total[i]
+}
+
+barplot(stats$Percent_Positive, names.arg = stats$Year, ylim = c(0,100), xlab = "Year", ylab = "% of No. of stocks with Positive Net Income")
+barplot(stats$Percent_Negative, names.arg = stats$Year, ylim = c(0,100), xlab = "Year", ylab = "% of No. of stocks with Negative Net Income")
+
+```
+
+The following plot shows the number of stocks present in the dataset from 1969-2020:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+
+#Number of companies each year from 1969-2020
+plot(stats$Year,stats$Total, type='l', xlab = "Year", ylab = "Total Number of stocks in dataset")
+
+```
+
+
+The following plots show the averages of different Leverage ratios (both book based and market based) by number of companies in the given range:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+# Leverage ratios vs Frequency
+leveragedatadf <- data.frame()
+for (i in 1:length(listdata)){
+  leveragedatadf <- rbind(leveragedatadf, c(mean(listdata[[i]]$Debt_Equity, na.rm = TRUE), mean(listdata[[i]]$Debt_Assets, na.rm = TRUE), mean(listdata[[i]]$Debt_Capital, na.rm = TRUE), mean(listdata[[i]]$Assets_Equity, na.rm = TRUE), mean(listdata[[i]]$Debt_Equity_Market, na.rm = TRUE), mean(listdata[[i]]$Debt_Capital_Market, na.rm = TRUE), mean(listdata[[i]]$Assets_Equity_Market, na.rm = TRUE)))
+}
+colnames(leveragedatadf) = c("Debt_Equity", "Debt_Assets","Debt_Capital", "Assets_Equity", "Debt_Equity_Market", "Debt_Capital_Market", "Assets_Equity_Market")
+
+hist(subset(leveragedatadf, `Debt_Equity`>-5 & `Debt_Equity`< 7) $`Debt_Equity`, breaks = seq(-5,7, length.out=20), main ="Debt-to-Equity vs Frequency", xlab = "Debt-to-Equity Ratio")
+
+hist(subset(leveragedatadf, `Debt_Assets`>0 & `Debt_Assets`< 5) $`Debt_Assets`, breaks = seq(0,5, length.out=20), main ="Debt-to-Assets vs Frequency", xlab = "Debt-to-Assets Ratio")
+
+hist(subset(leveragedatadf, `Debt_Capital`>-2 & `Debt_Capital`< 2) $`Debt_Capital`, breaks = seq(-2,2, length.out=20), main ="Debt-to-Capital vs Frequency", xlab = "Debt-to-Capital Ratio")
+
+hist(subset(leveragedatadf, `Assets_Equity`>-2 & `Assets_Equity`< 5) $`Assets_Equity`, breaks = seq(-2,5, length.out=20), main ="Assets-to-Equity vs Frequency", xlab = "Assets-to-Equity Ratio")
+
+hist(subset(leveragedatadf, `Debt_Equity_Market`>0 & `Debt_Equity_Market`< 5) $`Debt_Equity_Market`, breaks = seq(0,5, length.out=20), main ="Debt-to-Equity(Market based) vs Frequency", xlab = "Debt-to-Equity(Market based) Ratio")
+
+hist(subset(leveragedatadf, `Debt_Capital_Market`>-1 & `Debt_Capital_Market`< 3) $`Debt_Capital_Market`, breaks = seq(-1,3, length.out=20), main ="Debt-to-Capital(Market based) vs Frequency", xlab = "Debt-to-Capital(Market based) Ratio")
+
+hist(subset(leveragedatadf, `Assets_Equity_Market`>0 & `Assets_Equity_Market`< 7) $`Assets_Equity_Market`, breaks = seq(0,7, length.out=20), main ="Assets-to-Equity (Market based) vs Frequency", xlab = "Assets-to-Equity (Market based) Ratio")
+
+```
+
+The following plot shows the cashflow in different activities each year by all the companies in the dataset.
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+#Average Cash flows in different activities by year
+stats$Investing_Average <- 0
+stats$Financing_Average <- 0
+stats$Operating_Average <- 0
+
+for (i in 1969:2020){
+  stats[stats$Year==i,]$Investing_Average <- mean(stockdata[stockdata$`Data Year - Fiscal` == i,]$`Investing Activities - Net Cash Flow`, na.rm = TRUE)
+  stats[stats$Year==i,]$Financing_Average <- mean(stockdata[stockdata$`Data Year - Fiscal` == i,]$`Financing Activities - Net Cash Flow`, na.rm = TRUE)
+  stats[stats$Year==i,]$Operating_Average <- mean(stockdata[stockdata$`Data Year - Fiscal` == i,]$`Operating Activities - Net Cash Flow`, na.rm = TRUE)
+}
+
+plot(stats$Year, stats$Investing_Average, type='l', xlab = "Year", ylab = "Average Amount spent in Cashflow Activities", ylim=c(-500, 1200), col="red")
+lines(stats$Year, stats$Financing_Average, type='l', col = "green")
+lines(stats$Year, stats$Operating_Average, type='l', col = "blue")
+legend("topleft", legend=c("Total Financing Activities", "Total Investing Activities", "Total Operating Activities"),
+       col=c("green", "red", "blue"), lty = 1, cex=0.8)
+```
+
+
+## **Code used for the report**
+
+```{r, size="footnotesize", results='hide', message=F, warning=F, eval=FALSE}
+library(data.table)
+library(tidyverse)
+library(magrittr)
+library(xts)
+library(dplyr)
+library(prettydoc)
+library(lubridate)
+library(xtable)
+library(kableExtra)
+library(readxl)
+options(xtable.comment = FALSE)
+
+#Reading the data
+stockdata = read_excel('~/Documents/Documents/Decision Making/hw4data.xlsx')
+
+#Get only relevant data and compute required columns for leverage ratios
+stockdata <- as.data.table(stockdata)
+stockdata[, `Data Date`:=as.Date(as.character(`Data Date`), format = "%Y-%m-%d")]
+stockdata <- stockdata[complete.cases(stockdata[ , c(13,14,20,21,22)]),]
+
+stockdata <- stockdata %>% mutate(Debt_Equity = stockdata$`Liabilities - Total`/stockdata$`Stockholders Equity - Total`)
+stockdata <- stockdata %>% mutate(Debt_Assets = stockdata$`Liabilities - Total`/stockdata$`Assets - Total`)
+stockdata <- stockdata %>% mutate(Debt_Capital = stockdata$`Liabilities - Total`/(stockdata$`Assets - Total` + stockdata$`Stockholders Equity - Total`))
+stockdata <- stockdata %>% mutate(Assets_Equity = stockdata$`Assets - Total`/stockdata$`Stockholders Equity - Total`)
+stockdata <- stockdata %>% mutate(Debt_Equity_Market = stockdata$`Liabilities - Total`/stockdata$`Market Value - Total - Fiscal`)
+stockdata <- stockdata %>% mutate(Debt_Capital_Market = stockdata$`Liabilities - Total`/(stockdata$`Assets - Total`+ stockdata$`Market Value - Total - Fiscal`))
+stockdata <- stockdata %>% mutate(Assets_Equity_Market = stockdata$`Assets - Total`/stockdata$`Market Value - Total - Fiscal`)
+  
+#Make a list of dataframes, each dataframe indicating the information of a single stock - each stock differentiated by Company Key. 
+
+listdata <- list()
+
+for (i in 1:length(unique(stockdata$`Global Company Key`))) {
+  listdata[[i]] <- stockdata[stockdata$`Global Company Key` == unique(stockdata$`Global Company Key`)[i],]
+}
+
+
+#Compute the count of positive/negative net income each year for every stock
+profitdata <- list()
+
+for (i in 1:length(listdata)){
+  profitdata[[i]] <- xts(listdata[[i]]$`Net Income (Loss)`, as.Date(listdata[[i]]$`Data Date`))
+}
+
+profit_positive <- matrix(0, length(profitdata) , 52)
+profit_negative <- matrix(0, length(profitdata) , 52)
+profit_neutral <- matrix(0, length(profitdata) , 52)
+
+for (i in 1:length(profitdata)){
+  for (j in 1: length(year(index(profitdata[[i]])))){
+    k <- as.numeric(profitdata[[i]][j])
+    if(!is.na(k) && k > 0){
+    profit_positive[i,year(index(profitdata[[i]][j]))-1968] =  profit_positive[i,year(index(profitdata[[i]][j]))-1968] + 1
+    }  else if(!is.na(k) && k < 0){
+    profit_negative[i,year(index(profitdata[[i]][j]))-1968] =  profit_negative[i,year(index(profitdata[[i]][j]))-1968] + 1
+    } else {
+    profit_neutral[i,year(index(profitdata[[i]][j]))-1968] =  profit_neutral[i,year(index(profitdata[[i]][j]))-1968] + 1  
+    }
+}
+}
+
+#Total number of stocks in CRSP dataset under consideration in the last 52 years
+stocks <- length(listdata)
+years <- "1969 - 2020"
+
+#Highest ever cashflows in a particular year by a particular company
+highest_inv <- max(abs(stockdata$`Investing Activities - Net Cash Flow`), na.rm = TRUE)
+highest_inv_company <- stockdata[which.max(abs(stockdata$`Investing Activities - Net Cash Flow`))]$`Ticker Symbol`
+highest_inv_year <- stockdata[which.max(abs(stockdata$`Investing Activities - Net Cash Flow`))]$`Data Year - Fiscal`
+highest_oper <- max(stockdata$`Operating Activities - Net Cash Flow`, na.rm = TRUE)
+highest_oper_company <- stockdata[which.max(stockdata$`Operating Activities - Net Cash Flow`)]$`Ticker Symbol`
+highest_oper_year <- stockdata[which.max(stockdata$`Operating Activities - Net Cash Flow`)]$`Data Year - Fiscal`
+highest_fin <- max(abs(stockdata$`Financing Activities - Net Cash Flow`), na.rm = TRUE)
+highest_fin_company <- stockdata[which.max(abs(stockdata$`Financing Activities - Net Cash Flow`))]$`Ticker Symbol`
+highest_fin_year <- stockdata[which.max(abs(stockdata$`Financing Activities - Net Cash Flow`))]$`Data Year - Fiscal`
+
+#Highest market-book value ratio (Growth Expectation or any other reason)
+maxratio <- stockdata[is.finite(stockdata$`Market Value - Total - Fiscal`/(stockdata$`Assets - Total` - stockdata$`Liabilities - Total`))]
+maxratio_ratio <- max(maxratio$`Market Value - Total - Fiscal`/ (maxratio$`Assets - Total` - maxratio$`Liabilities - Total`))
+maxratio_year <- maxratio[which.max((maxratio$`Market Value - Total - Fiscal`/ (maxratio$`Assets - Total` - maxratio$`Liabilities - Total`)))]$`Data Year - Fiscal`
+maxratio_company <- maxratio[which.max((maxratio$`Market Value - Total - Fiscal`/ (maxratio$`Assets - Total` - maxratio$`Liabilities - Total`)))]$`Ticker Symbol`
+
+res = matrix(NA, nrow = 6, ncol = 1)
+colnames(res) = c("Summary Statistics")
+rownames(res)= c("Number of Stocks", "Years considered", "Highest ever CF in Investing in an year", "Highest ever CF in Financing in an year", "Highest ever CF in Operating in an year", "Highest market-book value ratio (Growth Expectation)")
+
+res[1,1] <- stocks
+res[2,1] <- "1969-2020"
+res[3,1] <- paste0(highest_inv, " million USD in ", highest_inv_year, " by NYSE: ", highest_inv_company )
+res[4,1] <- paste0(highest_fin, " million USD in ", highest_fin_year, " by NYSE: ", highest_fin_company )
+res[5,1] <- paste0(highest_oper, " million USD in ", highest_oper_year, " by NYSE: ", highest_oper_company )
+res[6,1] <- paste0(round(maxratio_ratio, digits = 0), " for ", maxratio_company, " in ", maxratio_year)
+
+
+kable(res, format = "markdown")
+
+#Percentage of number of stocks having positive and negative Net Income each year
+
+stats <- data.frame("Year"= 1969:2020, "Number of Stocks with Positive Net Income" = 0, "Number of Stocks with Negative Net Income"=0, "Zero Income Stocks" = 0)
+for (i in 1:52) {
+  stats$Number.of.Stocks.with.Positive.Net.Income[i] <- sum(profit_positive[,i])
+  stats$Number.of.Stocks.with.Negative.Net.Income[i] <- sum(profit_negative[,i])
+  stats$Zero.Income.Stocks[i] <- sum(profit_neutral[,i])
+  stats$Total[i] <- sum(stats$Number.of.Stocks.with.Positive.Net.Income[i], stats$Number.of.Stocks.with.Negative.Net.Income[i], stats$Zero.Income.Stocks[i])
+  stats$Percent_Positive[i] <- 100 * stats$Number.of.Stocks.with.Positive.Net.Income[i]/stats$Total[i]
+  stats$Percent_Negative[i] <- 100 * stats$Number.of.Stocks.with.Negative.Net.Income[i]/stats$Total[i]
+}
+
+barplot(stats$Percent_Positive, names.arg = stats$Year, ylim = c(0,100), xlab = "Year", ylab = "% of No. of stocks with Positive Net Income")
+barplot(stats$Percent_Negative, names.arg = stats$Year, ylim = c(0,100), xlab = "Year", ylab = "% of No. of stocks with Negative Net Income")
+
+#Number of companies each year from 1969-2020
+plot(stats$Year,stats$Total, type='l', xlab = "Year", ylab = "Total Number of stocks in dataset")
+
+# Leverage ratios vs Frequency
+leveragedatadf <- data.frame()
+for (i in 1:length(listdata)){
+  leveragedatadf <- rbind(leveragedatadf, c(mean(listdata[[i]]$Debt_Equity, na.rm = TRUE), mean(listdata[[i]]$Debt_Assets, na.rm = TRUE), mean(listdata[[i]]$Debt_Capital, na.rm = TRUE), mean(listdata[[i]]$Assets_Equity, na.rm = TRUE), mean(listdata[[i]]$Debt_Equity_Market, na.rm = TRUE), mean(listdata[[i]]$Debt_Capital_Market, na.rm = TRUE), mean(listdata[[i]]$Assets_Equity_Market, na.rm = TRUE)))
+}
+colnames(leveragedatadf) = c("Debt_Equity", "Debt_Assets","Debt_Capital", "Assets_Equity", "Debt_Equity_Market", "Debt_Capital_Market", "Assets_Equity_Market")
+
+hist(subset(leveragedatadf, `Debt_Equity`>-5 & `Debt_Equity`< 7) $`Debt_Equity`, breaks = seq(-5,7, length.out=20), main ="Debt-to-Equity vs Frequency", xlab = "Debt-to-Equity Ratio")
+
+hist(subset(leveragedatadf, `Debt_Assets`>0 & `Debt_Assets`< 5) $`Debt_Assets`, breaks = seq(0,5, length.out=20), main ="Debt-to-Assets vs Frequency", xlab = "Debt-to-Assets Ratio")
+
+hist(subset(leveragedatadf, `Debt_Capital`>-2 & `Debt_Capital`< 2) $`Debt_Capital`, breaks = seq(-2,2, length.out=20), main ="Debt-to-Capital vs Frequency", xlab = "Debt-to-Capital Ratio")
+
+hist(subset(leveragedatadf, `Assets_Equity`>-2 & `Assets_Equity`< 5) $`Assets_Equity`, breaks = seq(-2,5, length.out=20), main ="Assets-to-Equity vs Frequency", xlab = "Assets-to-Equity Ratio")
+
+hist(subset(leveragedatadf, `Debt_Equity_Market`>0 & `Debt_Equity_Market`< 5) $`Debt_Equity_Market`, breaks = seq(0,5, length.out=20), main ="Debt-to-Equity(Market based) vs Frequency", xlab = "Debt-to-Equity(Market based) Ratio")
+
+hist(subset(leveragedatadf, `Debt_Capital_Market`>-1 & `Debt_Capital_Market`< 3) $`Debt_Capital_Market`, breaks = seq(-1,3, length.out=20), main ="Debt-to-Capital(Market based) vs Frequency", xlab = "Debt-to-Capital(Market based) Ratio")
+
+hist(subset(leveragedatadf, `Assets_Equity_Market`>0 & `Assets_Equity_Market`< 7) $`Assets_Equity_Market`, breaks = seq(0,7, length.out=20), main ="Assets-to-Equity (Market based) vs Frequency", xlab = "Assets-to-Equity (Market based) Ratio")
+
+
+#Average Cash flows in different activities by year
+stats$Investing_Average <- 0
+stats$Financing_Average <- 0
+stats$Operating_Average <- 0
+
+for (i in 1969:2020){
+  stats[stats$Year==i,]$Investing_Average <- mean(stockdata[stockdata$`Data Year - Fiscal` == i,]$`Investing Activities - Net Cash Flow`, na.rm = TRUE)
+  stats[stats$Year==i,]$Financing_Average <- mean(stockdata[stockdata$`Data Year - Fiscal` == i,]$`Financing Activities - Net Cash Flow`, na.rm = TRUE)
+  stats[stats$Year==i,]$Operating_Average <- mean(stockdata[stockdata$`Data Year - Fiscal` == i,]$`Operating Activities - Net Cash Flow`, na.rm = TRUE)
+}
+
+plot(stats$Year, stats$Investing_Average, type='l', xlab = "Year", ylab = "Average Amount spent in Cashflow Activities", ylim=c(-500, 1200), col="red")
+lines(stats$Year, stats$Financing_Average, type='l', col = "green")
+lines(stats$Year, stats$Operating_Average, type='l', col = "blue")
+legend("topleft", legend=c("Total Financing Activities", "Total Investing Activities", "Total Operating Activities"),
+       col=c("green", "red", "blue"), lty = 1, cex=0.8)
+```
+
+# **References**
+
+1. CRSP Daily Stock data from WRDS. 

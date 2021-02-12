@@ -1,0 +1,125 @@
+---
+title: "Vector Auto Regression Modelling"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem 1: VAR Implementation
+
+Use the data on quarterly excess stock market returns, the market Dividend / Price ratio, and the di§erence between the 10-yr Treasury yield and the Fed Funds rate in the excel spreadsheet "MktRet_DP_TermSpread.xlsx". The interest rate data is from the FRED data depository, available online from the St. Louis Fed.  
+
+1. Plot each series. Give the sample mean, standard deviation, and First order autocor- relation of each series. From the First-order autocorrelation, calculate the half-life of each series (see ARMA notes for exact half-life formula).  
+
+```{r}
+library(readxl)
+library(DataAnalytics)
+library(dynlm)
+library(vars)
+
+VAR_data <- read_excel("~/Documents/Documents/Empirical Methods/MktRet_DP_TermSpread.xlsx")
+
+plot(VAR_data$Date,VAR_data$MktExRet,type='l')
+plot(VAR_data$Date,VAR_data$Mkt_DP,type='l')
+plot(VAR_data$Date,VAR_data$y10minFedFunds,type='l')
+
+Mean_mkt <- mean(VAR_data$MktExRet)
+Mean_dp <- mean(VAR_data$Mkt_DP)
+Mean_y10ff <- mean(VAR_data$y10minFedFunds)
+
+sd_mkt <- sd(VAR_data$MktExRet)
+sd_dp <- sd(VAR_data$Mkt_DP)
+sd_y10ff <- sd(VAR_data$y10minFedFunds)
+
+ac_mkt <- acf(VAR_data$MktExRet)[1]
+ac_dp <- acf(VAR_data$Mkt_DP)[1]
+ac_y10ff <- acf(VAR_data$y10minFedFunds)[1]
+
+hl_mkt <- log(0.5)/log(ac_mkt$acf)
+hl_dp <- log(0.5)/log(ac_dp$acf)
+hl_y10ff <- log(0.5)/log(ac_y10ff$acf)
+```
+
+2. Estimate a VAR(1). Give the coe¢ cient estimates, their White standard errors, and the R2 from each regression.  
+
+```{r}
+all_reg <- VAR(VAR_data[,2:4],p=1)
+
+summary(all_reg)
+
+Robust_White <- coeftest(all_reg, vcov = vcovHC(all_reg, type="HC0"))
+```
+
+3. Is the VAR stationary?  
+\newline
+Yes, the VAR is stationary as all auto-correlations are < 1.  
+
+4. What is the volatility of quarterly expected returns given the return forecasting regression?  
+\newline
+From the summary of the VAR we see that the volatility (Regression Standard Error) is 8.24%.
+
+5. Plot the one-quarter ahead expected return series. Plot the four quarters ahead expected return series. Plot the twenty quarters ahead expected return series. Comment on how the persistence of the term spread and the DP-ratio affects the expected return forecasts at different horizons.  
+\newline
+```{r}
+phi0 <- matrix(0, 3, 1)
+phi1 <- matrix(0, 3, 3)
+phi0[1,] <- all_reg$varresult$MktExRet$coefficients[4]
+phi0[2,] <- all_reg$varresult$Mkt_DP$coefficients[4]
+phi0[3,] <- all_reg$varresult$y10minFedFunds$coefficients[4]
+
+phi1[1,] <- all_reg$varresult$MktExRet$coefficients[1:3]
+phi1[2,] <- all_reg$varresult$Mkt_DP$coefficients[1:3]
+phi1[3,] <- all_reg$varresult$y10minFedFunds$coefficients[1:3]
+
+Expected_VAR <- as.matrix(VAR_data)
+Expected_VAR <- Expected_VAR[2:length(VAR_data$MktExRet),2:4]
+
+Expected_VAR_1per <- rep(phi0) +   phi1 %*% t(Expected_VAR)
+Expected_VAR_1per <- t(Expected_VAR_1per)
+
+plot(VAR_data$Date[2:236], Expected_VAR_1per[,1], type='l')
+plot(VAR_data$Date[2:236], Expected_VAR_1per[,2], type='l')
+plot(VAR_data$Date[2:236], Expected_VAR_1per[,3], type='l')
+
+Expected_VAR_4per <- rep(phi0) +   phi1^4 %*% t(Expected_VAR)
+Expected_VAR_4per <- t(Expected_VAR_4per)
+                                                                                                                                                       
+plot(VAR_data$Date[2:236], Expected_VAR_4per[,1], type='l')
+plot(VAR_data$Date[2:236], Expected_VAR_4per[,2], type='l')
+plot(VAR_data$Date[2:236], Expected_VAR_4per[,3], type='l')  
+
+
+Expected_VAR_20per <- rep(phi0) + phi1^4 %*% t(Expected_VAR)
+Expected_VAR_20per <- t(Expected_VAR_20per)
+
+plot(VAR_data$Date[2:236], Expected_VAR_20per[,1], type='l')
+plot(VAR_data$Date[2:236], Expected_VAR_20per[,2], type='l')
+plot(VAR_data$Date[2:236], Expected_VAR_20per[,3], type='l')  
+```
+6. Plot the impulse-response function for returns from a one standard deviation positive shock from each of the three shocks in turn using 20 lags. You can do this by simulation. Start at unconditional averages for the lagged values of all the variables in the VAR (time t-1). Then set the time t shock in row 1 of the VAR to its one standard deviation value, and set all other current and future shocks to zero. Trace out the response by simulating future variables using the VAR dynamics. That ís the impulse-response for the first shock. Then go to the second shock and repeat the procedure just outlined for the first shock, but now set the second shock to its one standard deviation value and all other shocks to zero, etc. (it is best to plot the orthogonalized shock version of impulse-response (order the shocks Term Spread, D/P. and Returns), but it is also fine if you do it the simple way. The orthogonalized impulse-response math is given in the appendix).    
+```{r}
+Impulse_Response <- irf(all_reg)
+plot(Impulse_Response)
+```
+
+7. Using 80% of the data as a training sample, report results from an out-of-sample test for predicting excess market returns where you re-estimate the model at each time t and get the prediction error for the t + 1 realizations.  
+```{r}
+library("forecastSNSTS")
+library("forecast")
+library("mosaic")
+library("mltools")
+
+Trained_Reg <- lm(VAR_data$MktExRet[1:round(0.8*236)] ~ back(VAR_data$MktExRet[1:round(0.8*236)]) + back(VAR_data$Mkt_DP[1:round(0.8*236)]) + back(VAR_data$y10minFedFunds[1:round(0.8*236)]))
+
+Out_of_Sample_Est <- 0
+Out_of_Sample_Est[1:189] <- 0
+
+for(i in 190:236){
+  Out_of_Sample_Est[i] <- Trained_Reg$coefficients[1] + (Trained_Reg$coefficients[2]*VAR_data$MktExRet[i]) + (Trained_Reg$coefficients[3]*VAR_data$Mkt_DP[i]) + (Trained_Reg$coefficients[4]*VAR_data$y10minFedFunds[i])
+}
+
+MSPE <- mse(preds = Out_of_Sample_Est[190:236], actuals = VAR_data$MktExRet[190:236])
+MSPE
+```

@@ -1,0 +1,244 @@
+---
+title: "Stock Price Analysis during Dividends announcements"
+author: "Sai Sandeep Chandaluri"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+---
+
+## **Question**
+
+We are interested to learn how stocks perform in terms of excess rates of return when they are actually paying a dividend. (The cum to ex-dates are noted for each stock in CRSP.) What happened to the stock return (minus the S&P500 on the same day) from days -20 through day +20, each day by day? Line up all stock excess returns on the event dates, and calculate the mean across all stock-days. This is the day 0 event mean excess rate of return. Eventually, your result will be 41 mean excess rates of return, that you can graph with relative day on the x-axis and mean rate of return (across all excess returns) on the y-axis. You can do this assignment only for calendar years after 2010 to make it simpler. (O: How does each stock's rate of return relate to the amount of the dividend it actually paid?).
+
+
+## **Executive Summary**
+
+Stock market is usually very active during the announcements of dividends by companies and stock prices automatically adjust according to the dividends that are announced. We see stock prices generally rising until before the ex-date and then drop suddenly on the ex-dividend date. We want to analyse this behavior analytically using stock price data 20 days before dividend announcement and 20 days after dividend announcement. We compare the arithmetic mean excess returns (excess in comparison to S&P 500 index that includes dividends) of the stocks in CRSP across the 41 days from January 2010 to December 2019 and try to understand the price movement across dividend payments. After plotting, the following observations have been made:
+
+1. On the ex-date, we see a sudden dip in excess return which signifies that Stock Price dipped immediately after dividend payment. 
+2. After the ex-dates, the excess returns are back to normal levels. 
+3. While most mean excess returns are around zero, the mean excess return on the ex-date is significantly negative, indicating that there's a drop in price. 
+4. The mean daily excess return is about -0.013%. This indicates that the mean dividend yield is about 4.75% (after annualizing 0.013%) for the stocks in CRSP from 2010 to 2019.     
+
+## **Computation Methodology**
+
+**1. Choosing the right data:** 
+
+All the data for carrying out this work have been taken from WRDS. We have taken the CRSP Daily stock data that includes stock information like PERMNO, Avg Bid/Ask Price on each Date, Dividend Declaration date, Payment Date, Record Date, Value weighted S&P 500 return (along with Dividends) etc. 
+
+The following is the path of data on WRDS: CRSP -> Annual Update -> Stock -> Security Files -> CRSP Daily Stock
+
+**2. Data Transformation:**
+
+The given data is cropped to consider only for the time frame under consideration. The data is divided into separate stocks based on PERMNO. About a month's extra data is taken before Jan 2010 and at the end. Dividends in the extra months are not considered for computations.    
+
+**3. Computation of excess returns:**
+
+Stock Daily Returns and Excess returns are computed using the following formulas:
+
+$$ Daily\space Stock\space Return = \frac{Current\space Price - Previous\space Price}{Previous\space Price}$$
+$$ Excess\space Return = Daily\space Stock \space Return - Daily\space S\&P\space Return$$
+
+Also, stocks with abnormal returns are considered to be stock consolidations and are ignored while doing above computations. Once the excess returns for all the 41 days (-20 to 20) across each dividend data are computed for each stock, the mean across each of the stocks based on day from dividend is computed. Then, the mean of the day from dividend wise returns for all the stocks are computed to get the final output. 
+
+$$ R_j = \frac{\Sigma{r_{ij}}}{N}$$
+where 
+$R_j$: Mean Excess Return on j day from dividend date, 
+$r_{i,j}$: Mean Excess Return on j day from dividend for Stock $i$ and 
+$N$: Number of Stocks  
+
+**4. Results:**
+
+The final plot of excess daily returns based on days from dividend is obtained as below:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+library(data.table)
+library(tidyverse)
+library(magrittr)
+library(xts)
+library(dplyr)
+library(prettydoc)
+library(lubridate)
+library(xtable)
+library(kableExtra)
+library(readxl)
+options(xtable.comment = FALSE)
+
+#Data end points
+begindate = as.Date("2009-12-01")
+divcutdate = as.Date("2009-12-31")
+enddate = as.Date("2019-12-31")
+
+#Reading the data
+stockdata = read_excel('~/Documents/Documents/Decision Making/hw2data.xlsx')
+colnames(stockdata) = c("PERMNO", "Date", "Declaration Date", "Payment Date", "Record Date", "Price", "vwretd_div", "vwretd_no_div")
+
+#WRDS indicates prices as negative if they're derived from other information than Bid/Ask prices
+stockdata$Price = abs(stockdata$Price)
+
+#Get only relevant data
+stockdata <- as.data.table(stockdata)
+stockdata[, Date:=as.Date(as.character(Date), format = "%Y%m%d")]
+
+stockdata[, `Declaration Date`:=as.Date(as.character(`Declaration Date`), format = "%Y%m%d")]
+stockdata[, `Payment Date`:=as.Date(as.character(`Payment Date`), format = "%Y%m%d")]
+stockdata[, `Record Date`:=as.Date(as.character(`Record Date`), format = "%Y%m%d")]
+
+stockdata <- stockdata[complete.cases(stockdata[ , 6]),]
+
+stockdata = stockdata[Date %between% c(begindate, enddate),]
+ 
+#Make a list of dataframes, each dataframe indicating the information of a single stock - each stock differentiated by PERMNO. 
+#Compute daily stock return and excess returns wrt S&P 500 index
+listdata <- list()
+
+for (i in 1:length(unique(stockdata$PERMNO))) {
+  listdata[[i]] <- stockdata[stockdata$PERMNO == unique(stockdata$PERMNO)[i],]
+  if (nrow(listdata[[i]]) > 41) {
+  tempdata1 <- listdata[[i]][1:20,]
+  tempdata2 <- listdata[[i]][21:(nrow(listdata[[i]])-20),]
+  tempdata3 <- listdata[[i]][(nrow(listdata[[i]])-19): nrow(listdata[[i]]),]
+  tempdata1$`Record Date` = NULL
+  tempdata3$`Record Date` = NULL
+  listdata[[i]] <- rbind(tempdata1, tempdata2, tempdata3, fill=TRUE)
+  setkey(listdata[[i]], 'Date')
+  }
+  listdata[[i]] <- listdata[[i]] %>% mutate(Prev_Price = c(NA, listdata[[i]]$Price[-nrow(listdata[[i]])]))
+  listdata[[i]] <- listdata[[i]][complete.cases(listdata[[i]][ , 9]),]
+  listdata[[i]] <- listdata[[i]] %>% mutate(Stock_Return = (Price - Prev_Price)/Prev_Price)
+  listdata[[i]] <- listdata[[i]] %>% mutate(Excess_Return = Stock_Return - vwretd_div)
+}
+
+#Ignore abnormal returns that indicate reverse stock split/consolidation
+for (i in 1:length(unique(stockdata$PERMNO))) {
+  for (j in which(!is.na(listdata[[i]]$`Record Date`))) {
+  if (!is.na(listdata[[i]]$Excess_Return[j]) && listdata[[i]]$Excess_Return[j]  > 0.2) {
+    listdata[[i]]$Excess_Return[j] = NA
+  }
+}
+}
+
+#Compute mean excess return for each stock based on day from ex-date
+excess_return_list <- matrix(0, nrow = length(unique(stockdata$PERMNO)), ncol = 41)
+
+for (i in 1:length(unique(stockdata$PERMNO))){
+  for (j in 1:41){
+    if ((identical(integer(0), which(!is.na(listdata[[i]]$`Record Date`)) - 21 + j) || identical(numeric(0), which(!is.na(listdata[[i]]$`Record Date`)) - 21 + j)) || nrow(listdata[[i]]) < 42 || length(which(!is.na(listdata[[i]]$`Record Date`))) < 4 ) {
+  excess_return_list[i,j] <- NA     
+    }else
+  excess_return_list[i,j] <-  mean(listdata[[i]]$Excess_Return[which(!is.na(listdata[[i]]$`Record Date`)) - 21 + j], na.rm = TRUE )
+  }
+}
+
+#Computation of daily mean excess returns across all stocks based on day from ex-date. 
+mean_excess_return <- list()
+
+for (i in 1:41) {
+  mean_excess_return[i] <- mean(excess_return_list[,i], na.rm = TRUE)
+}
+
+mean_excess_return_df <- t(as.data.frame(mean_excess_return))
+
+
+#Plotting the result
+plot(x = -20:20, y =mean_excess_return_df, type='l', xlab = "Days from Dividend", ylab = "Mean Excess Return")
+
+
+```
+
+## **Code to compute the returns**
+
+```{r, size="footnotesize", results='hide', message=F, warning=F, eval=FALSE}
+library(data.table)
+library(tidyverse)
+library(magrittr)
+library(xts)
+library(dplyr)
+library(prettydoc)
+library(lubridate)
+library(xtable)
+library(kableExtra)
+library(readxl)
+options(xtable.comment = FALSE)
+
+begindate = as.Date("2009-12-01")
+divcutdate = as.Date("2009-12-31")
+enddate = as.Date("2019-12-31")
+
+#read the data, beginning with the S&P
+#stock data
+stockdata = read_excel('~/Documents/Documents/Decision Making/hw2data.xlsx')
+colnames(stockdata) = c("PERMNO", "Date", "Declaration Date", "Payment Date", "Record Date", "Price", "vwretd_div", "vwretd_no_div")
+
+stockdata$Price = abs(stockdata$Price)
+
+stockdata <- as.data.table(stockdata)
+stockdata[, Date:=as.Date(as.character(Date), format = "%Y%m%d")]
+
+stockdata[, `Declaration Date`:=as.Date(as.character(`Declaration Date`), format = "%Y%m%d")]
+stockdata[, `Payment Date`:=as.Date(as.character(`Payment Date`), format = "%Y%m%d")]
+stockdata[, `Record Date`:=as.Date(as.character(`Record Date`), format = "%Y%m%d")]
+
+stockdata <- stockdata[complete.cases(stockdata[ , 6]),]
+
+stockdata = stockdata[Date %between% c(begindate, enddate),]
+ 
+
+listdata <- list()
+
+for (i in 1:length(unique(stockdata$PERMNO))) {
+  listdata[[i]] <- stockdata[stockdata$PERMNO == unique(stockdata$PERMNO)[i],]
+  if (nrow(listdata[[i]]) > 41) {
+  tempdata1 <- listdata[[i]][1:20,]
+  tempdata2 <- listdata[[i]][21:(nrow(listdata[[i]])-20),]
+  tempdata3 <- listdata[[i]][(nrow(listdata[[i]])-19): nrow(listdata[[i]]),]
+  tempdata1$`Record Date` = NULL
+  tempdata3$`Record Date` = NULL
+  listdata[[i]] <- rbind(tempdata1, tempdata2, tempdata3, fill=TRUE)
+  setkey(listdata[[i]], 'Date')
+  }
+  listdata[[i]] <- listdata[[i]] %>% mutate(Prev_Price = c(NA, listdata[[i]]$Price[-nrow(listdata[[i]])]))
+  listdata[[i]] <- listdata[[i]][complete.cases(listdata[[i]][ , 9]),]
+  listdata[[i]] <- listdata[[i]] %>% mutate(Stock_Return = (Price - Prev_Price)/Prev_Price)
+  listdata[[i]] <- listdata[[i]] %>% mutate(Excess_Return = Stock_Return - vwretd_div)
+}
+
+for (i in 1:length(unique(stockdata$PERMNO))) {
+  for (j in which(!is.na(listdata[[i]]$`Record Date`))) {
+  if (!is.na(listdata[[i]]$Excess_Return[j]) && listdata[[i]]$Excess_Return[j]  > 0.2) {
+    listdata[[i]]$Excess_Return[j] = NA
+  }
+}
+}
+
+
+
+excess_return_list <- matrix(0, nrow = length(unique(stockdata$PERMNO)), ncol = 41)
+
+for (i in 1:length(unique(stockdata$PERMNO))){
+  for (j in 1:41){
+    if ((identical(integer(0), which(!is.na(listdata[[i]]$`Record Date`)) - 21 + j) || identical(numeric(0), which(!is.na(listdata[[i]]$`Record Date`)) - 21 + j)) || nrow(listdata[[i]]) < 42 || length(which(!is.na(listdata[[i]]$`Record Date`))) < 4 ) {
+  excess_return_list[i,j] <- NA     
+    }else
+  excess_return_list[i,j] <-  mean(listdata[[i]]$Excess_Return[which(!is.na(listdata[[i]]$`Record Date`)) - 21 + j], na.rm = TRUE )
+  }
+}
+
+mean_excess_return <- list()
+
+for (i in 1:41) {
+  mean_excess_return[i] <- mean(excess_return_list[,i], na.rm = TRUE)
+}
+
+mean_excess_return_df <- t(as.data.frame(mean_excess_return))
+
+
+
+plot(x = -20:20, y =mean_excess_return_df, type='l', xlab = "Days from Dividend", ylab = "Mean Excess Return")
+
+
+```
+
+# **References**
+
+1. CRSP Daily Stock data from WRDS.  

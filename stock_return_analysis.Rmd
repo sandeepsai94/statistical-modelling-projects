@@ -1,0 +1,350 @@
+---
+title: "Creating Datasets for Return Analysis of CRSP Companies"
+author: "Sai Sandeep Chandaluri"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+---
+
+
+## **Question**
+
+Create an annual data set of compounded rates of return for each stock: perm, ticker, cusip, year, marketcap, rate of return. do not drop stocks in their year of disappearance! 
+
+
+## **Executive Summary**
+
+CRSP maintains large datasets with information about stocks and bonds. Whenever a dataset is created from CRSP, it is vital to understand all the summary statistics of the dataset before conclusions are drawn based on results derived from the data. The current exercise attempts to understand the dataset properly before it is put to use. We have considered a 51-year data from 1969 to 2019 that consists of information(Permno, ticker, cusip, years, Shares outstanding, Price, Acquiring company, Delisted Date, rate of return- with and without dividends) of about 361 stocks. 
+
+## **Computation Methodology**
+
+**1. Choosing the right data:** 
+
+The following is the path of data on WRDS: CRSP -> Annual Update -> Stock -> Security Files -> CRSP Daily Stock
+
+**2. Data Transformation:**
+
+The given data is cropped to consider only for the time frame from 1969 to 2019. The data is divided into separate stocks based on PERMNO. Compounded rates of return for each stock are computed over their years of appearance.  
+
+**3. Results:**
+
+Dataset taken is explained by the following:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+library(data.table)
+library(tidyverse)
+library(magrittr)
+library(xts)
+library(dplyr)
+library(prettydoc)
+library(lubridate)
+library(xtable)
+library(kableExtra)
+library(readxl)
+options(xtable.comment = FALSE)
+
+#Data end points
+begindate = as.Date("1969-01-01")
+enddate = as.Date("2019-12-31")
+
+#Reading the data
+stockdata = read_excel('~/Documents/Documents/Decision Making/hw3data.xlsx')
+stockdata$`Delisting Code`=NULL
+colnames(stockdata) = c("PERMNO", "Date","TICKER", "Declaration Date", "Delisted Date", "Acquiring Company", "Delisting Price", "Price", "Return_Div", "Shares Outstanding","Returns_No_Div", "VWRETD_No_Div","VWRETD_DIV")
+
+#WRDS indicates prices as negative if they're derived from other information than Bid/Ask prices
+stockdata$Price = abs(stockdata$Price)
+
+#Get only relevant data
+stockdata <- as.data.table(stockdata)
+stockdata[, Date:=as.Date(as.character(Date), format = "%Y%m%d")]
+
+stockdata$Return_Div <- as.double(stockdata$Return_Div)
+stockdata$Returns_No_Div <- as.double(stockdata$Returns_No_Div)
+stockdata <- stockdata[complete.cases(stockdata[ , c(8,9,11,12,13)]),]
+stockdata = stockdata[Date %between% c(begindate, enddate),]
+ 
+#Make a list of dataframes, each dataframe indicating the information of a single stock - each stock differentiated by PERMNO. 
+#Compute daily stock return and excess returns wrt S&P 500 index
+listdata <- list()
+
+for (i in 1:length(unique(stockdata$PERMNO))) {
+  listdata[[i]] <- stockdata[stockdata$PERMNO == unique(stockdata$PERMNO)[i],]
+  listdata[[i]] <- listdata[[i]] %>% mutate(Excess_Return = Return_Div - VWRETD_DIV)
+  listdata[[i]] <- listdata[[i]] %>% mutate(Excess_Return_No_Div = Returns_No_Div - VWRETD_No_Div)
+}
+
+#Compute the compounded rate of returns for each year for every stock
+returndata <- list()
+
+for (i in 1:length(listdata)){
+ 
+  returndata[[i]] <- apply.yearly(xts(listdata[[i]]$Return_Div, as.Date(listdata[[i]]$Date)) + 1, prod )
+  returndata[[i]] <- returndata[[i]] - 1
+}
+
+return_positive <- matrix(0, length(returndata) , 51)
+return_negative <- matrix(0, length(returndata) , 51)
+return_neutral <- matrix(0, length(returndata) , 51)
+
+for (i in 1:length(returndata)){
+  for (j in 1: length(year(index(returndata[[i]])))){
+    k <- as.numeric(returndata[[i]][j])
+    if(k > 0){
+    return_positive[i,year(index(returndata[[i]][j]))-1968] =  return_positive[i,year(index(returndata[[i]][j]))-1968] + 1
+    }  else if(k < 0){
+    return_negative[i,year(index(returndata[[i]][j]))-1968] =  return_negative[i,year(index(returndata[[i]][j]))-1968] + 1
+    } else {
+    return_neutral[i,year(index(returndata[[i]][j]))-1968] =  return_neutral[i,year(index(returndata[[i]][j]))-1968] + 1  
+    }
+}
+}
+```
+
+The following table describes some of the summary statistics based on the dataset:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+
+#Total number of stocks in CRSP dataset under consideration in the last 51 years
+stocks <- length(listdata)
+
+#Number of delisted stocks
+#Number of acquiring companies 
+delisted <- length(which(!is.na(stockdata$`Delisted Date`)))
+acquired <- length(which(!is.na(stockdata$`Acquiring Company`)))
+
+#Highest and Lowest ever composite annual return
+highest <- 0
+lowest <- 0
+for (i in 1:length(returndata)){
+  for (j in 1:length(returndata[[i]])){
+   highest <-  max(as.numeric(returndata[[i]][j]), highest)
+   lowest <- min(as.numeric(returndata[[i]][j]), lowest)
+  }
+}
+
+
+res = matrix(NA, nrow = 8, ncol = 1)
+colnames(res) = c("Summary Statistics")
+rownames(res)= c("Number of Stocks", "Years considered", "Number of Delisted stocks", "Number of Acquiring Companies", "Highest ever composite annual return", "Stock ticker and year of above","Lowest ever composite annual return", "Stock ticker and year of above")
+
+res[1,1] <- stocks
+res[2,1] <- "1969-2019"
+res[3,1] <- delisted
+res[4,1] <- acquired
+res[5,1] <- paste0(highest * 100, " %")
+res[6,1] <- "ALKM - 2001"
+res[7,1] <- paste0(lowest * 100, " %")
+res[8,1] <- "BURN - 2000"
+
+kable(res, format = "markdown")
+```
+
+The following plots describe the percentage of stocks that have positive composite annual return and negative composite annual return each year, out of the stocks in the dataset taken:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+#Percentage of number of stocks having positive return each year
+#Percentage of number of stocks having negative return each year
+
+stats <- data.frame("Year"= 1969:2019, "Number of Stocks with Positive Returns" = 0, "Number of Stocks with Negative Returns"=0, "Zero Return Stocks" = 0)
+for (i in 1:51) {
+  stats$Number.of.Stocks.with.Positive.Returns[i] <- sum(return_positive[,i])
+  stats$Number.of.Stocks.with.Negative.Returns[i] <- sum(return_negative[,i])
+  stats$Zero.Return.Stocks[i] <- sum(return_neutral[,i])
+  stats$Total[i] <- sum(stats$Number.of.Stocks.with.Positive.Returns[i], stats$Number.of.Stocks.with.Negative.Returns[i], stats$Zero.Return.Stocks[i])
+  stats$Percent_Positive[i] <- 100 * stats$Number.of.Stocks.with.Positive.Returns[i]/stats$Total[i]
+  stats$Percent_Negative[i] <- 100 * stats$Number.of.Stocks.with.Negative.Returns[i]/stats$Total[i]
+}
+
+barplot(stats$Percent_Positive, names.arg = stats$Year, ylim = c(0,100), xlab = "Year", ylab = "% of No. of stocks with Positive Annual Compounded Returns")
+barplot(stats$Percent_Negative, names.arg = stats$Year, ylim = c(0,100), xlab = "Year", ylab = "% of No. of stocks with Negative Annual Compounded Returns")
+
+```
+
+The following plot shows the number of stocks present in the dataset from 1969-2019:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+
+#Number of companies each year from 1969-2019
+plot(stats$Year,stats$Total, type='l', xlab = "Year", ylab = "Total Number of stocks in dataset")
+
+```
+
+The following plot shows the percentage of the number of delisted companies by year:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+#Number of delisted companies from 1969-2019 each year
+stats$Number_of_delisted <- 0
+for (i in year(stockdata[which(!is.na(stockdata$`Delisted Date`))]$Date)){
+  
+  stats[stats$Year==i,]$Number_of_delisted <- stats[stats$Year==i,]$Number_of_delisted + 1
+  
+}
+
+plot(stats$Year,stats$Number_of_delisted * 100 / stats$Total, type='l', xlab = "Year", ylab = "Percentage of stocks delisted")
+```
+
+The following plot describes the Market Cap on the last available date vs the Number of years the data is present:
+
+```{r, size="footnotesize", results='asis', echo=FALSE, warning=FALSE, message=FALSE}
+#Market Cap vs Years of existence
+stats_mcap <- data.frame( "Ticker" = rep(NA,361),"Number of years"=rep(0,361), "Market Cap" = rep(0, 361))
+for (i in 1:361) {
+  stats_mcap$Ticker[i] <- tail(listdata[[i]]$TICKER, 1)
+  stats_mcap$Number.of.years[i] <- time_length(difftime(tail(listdata[[i]]$Date, 1),head(listdata[[i]]$Date, 1)), "years")
+  stats_mcap$Market.Cap[i] <- listdata[[i]][listdata[[i]]$Date == tail(listdata[[i]]$Date, 1),]$Price * listdata[[i]][listdata[[i]]$Date == tail(listdata[[i]]$Date, 1),]$`Shares Outstanding`
+}
+
+plot(stats_mcap$Market.Cap, stats_mcap$Number.of.years, xlab = "Number of years company existed", ylab = "Market Cap as of last available date")
+```
+
+## **Code used for the report**
+
+```{r, size="footnotesize", results='hide', message=F, warning=F, eval=FALSE}
+library(data.table)
+library(tidyverse)
+library(magrittr)
+library(xts)
+library(dplyr)
+library(prettydoc)
+library(lubridate)
+library(xtable)
+library(kableExtra)
+library(readxl)
+options(xtable.comment = FALSE)
+
+#Data end points
+begindate = as.Date("1969-01-01")
+enddate = as.Date("2019-12-31")
+
+#Reading the data
+stockdata = read_excel('~/Documents/Documents/Decision Making/hw3data.xlsx')
+stockdata$`Delisting Code`=NULL
+colnames(stockdata) = c("PERMNO", "Date","TICKER", "Declaration Date", "Delisted Date", "Acquiring Company", "Delisting Price", "Price", "Return_Div", "Shares Outstanding","Returns_No_Div", "VWRETD_No_Div","VWRETD_DIV")
+
+#WRDS indicates prices as negative if they're derived from other information than Bid/Ask prices
+stockdata$Price = abs(stockdata$Price)
+
+#Get only relevant data
+stockdata <- as.data.table(stockdata)
+stockdata[, Date:=as.Date(as.character(Date), format = "%Y%m%d")]
+
+stockdata$Return_Div <- as.double(stockdata$Return_Div)
+stockdata$Returns_No_Div <- as.double(stockdata$Returns_No_Div)
+stockdata <- stockdata[complete.cases(stockdata[ , c(8,9,11,12,13)]),]
+stockdata = stockdata[Date %between% c(begindate, enddate),]
+ 
+#Make a list of dataframes, each dataframe indicating the information of a single stock - each stock differentiated by PERMNO. 
+#Compute daily stock return and excess returns wrt S&P 500 index
+listdata <- list()
+
+for (i in 1:length(unique(stockdata$PERMNO))) {
+  listdata[[i]] <- stockdata[stockdata$PERMNO == unique(stockdata$PERMNO)[i],]
+  listdata[[i]] <- listdata[[i]] %>% mutate(Excess_Return = Return_Div - VWRETD_DIV)
+  listdata[[i]] <- listdata[[i]] %>% mutate(Excess_Return_No_Div = Returns_No_Div - VWRETD_No_Div)
+}
+
+#Compute the compounded rate of returns for each year for every stock
+returndata <- list()
+
+for (i in 1:length(listdata)){
+ 
+  returndata[[i]] <- apply.yearly(xts(listdata[[i]]$Return_Div, as.Date(listdata[[i]]$Date)) + 1, prod )
+  returndata[[i]] <- returndata[[i]] - 1
+}
+
+return_positive <- matrix(0, length(returndata) , 51)
+return_negative <- matrix(0, length(returndata) , 51)
+return_neutral <- matrix(0, length(returndata) , 51)
+
+for (i in 1:length(returndata)){
+  for (j in 1: length(year(index(returndata[[i]])))){
+    k <- as.numeric(returndata[[i]][j])
+    if(k > 0){
+    return_positive[i,year(index(returndata[[i]][j]))-1968] =  return_positive[i,year(index(returndata[[i]][j]))-1968] + 1
+    }  else if(k < 0){
+    return_negative[i,year(index(returndata[[i]][j]))-1968] =  return_negative[i,year(index(returndata[[i]][j]))-1968] + 1
+    } else {
+    return_neutral[i,year(index(returndata[[i]][j]))-1968] =  return_neutral[i,year(index(returndata[[i]][j]))-1968] + 1  
+    }
+}
+}
+
+
+#Total number of stocks in CRSP dataset under consideration in the last 51 years
+stocks <- length(listdata)
+
+#Number of delisted stocks
+#Number of acquiring companies 
+delisted <- length(which(!is.na(stockdata$`Delisted Date`)))
+acquired <- length(which(!is.na(stockdata$`Acquiring Company`)))
+
+#Highest and Lowest ever composite annual return
+highest <- 0
+lowest <- 0
+for (i in 1:length(returndata)){
+  for (j in 1:length(returndata[[i]])){
+   highest <-  max(as.numeric(returndata[[i]][j]), highest)
+   lowest <- min(as.numeric(returndata[[i]][j]), lowest)
+  }
+}
+
+
+res = matrix(NA, nrow = 8, ncol = 1)
+colnames(res) = c("Summary Statistics")
+rownames(res)= c("Number of Stocks", "Years considered", "Number of Delisted stocks", "Number of Acquiring Companies", "Highest ever composite annual return", "Stock ticker and year of above","Lowest ever composite annual return", "Stock ticker and year of above")
+
+res[1,1] <- stocks
+res[2,1] <- "1969-2019"
+res[3,1] <- delisted
+res[4,1] <- acquired
+res[5,1] <- paste0(highest * 100, " %")
+res[6,1] <- "ALKM - 2001"
+res[7,1] <- paste0(lowest * 100, " %")
+res[8,1] <- "BURN - 2000"
+
+kable(res, format = "markdown")
+
+#Percentage of number of stocks having positive excess return each year
+#Percentage of number of stocks having negative excess return each year
+
+stats <- data.frame("Year"= 1969:2019, "Number of Stocks with Positive Returns" = 0, "Number of Stocks with Negative Returns"=0, "Zero Return Stocks" = 0)
+for (i in 1:51) {
+  stats$Number.of.Stocks.with.Positive.Returns[i] <- sum(return_positive[,i])
+  stats$Number.of.Stocks.with.Negative.Returns[i] <- sum(return_negative[,i])
+  stats$Zero.Return.Stocks[i] <- sum(return_neutral[,i])
+  stats$Total[i] <- sum(stats$Number.of.Stocks.with.Positive.Returns[i], stats$Number.of.Stocks.with.Negative.Returns[i], stats$Zero.Return.Stocks[i])
+  stats$Percent_Positive[i] <- 100 * stats$Number.of.Stocks.with.Positive.Returns[i]/stats$Total[i]
+  stats$Percent_Negative[i] <- 100 * stats$Number.of.Stocks.with.Negative.Returns[i]/stats$Total[i]
+}
+
+barplot(stats$Percent_Positive, names.arg = stats$Year, ylim = c(0,100), xlab = "Year", ylab = "% of No. of stocks with Positive Annual Compounded Returns")
+barplot(stats$Percent_Negative, names.arg = stats$Year, ylim = c(0,100), xlab = "Year", ylab = "% of No. of stocks with Negative Annual Compounded Returns")
+
+#Number of companies each year from 1969-2019
+plot(stats$Year,stats$Total, type='l', xlab = "Year", ylab = "Total Number of stocks in dataset")
+
+#Number of delisted companies from 1969-2019 each year
+stats$Number_of_delisted <- 0
+for (i in year(stockdata[which(!is.na(stockdata$`Delisted Date`))]$Date)){
+  
+  stats[stats$Year==i,]$Number_of_delisted <- stats[stats$Year==i,]$Number_of_delisted + 1
+  
+}
+
+plot(stats$Year,stats$Number_of_delisted * 100 / stats$Total, type='l', xlab = "Year", ylab = "Percentage of stocks delisted")
+
+#Market Cap vs Years of existence
+stats_mcap <- data.frame( "Ticker" = rep(NA,361),"Number of years"=rep(0,361), "Market Cap" = rep(0, 361))
+for (i in 1:361) {
+  stats_mcap$Ticker[i] <- tail(listdata[[i]]$TICKER, 1)
+  stats_mcap$Number.of.years[i] <- time_length(difftime(tail(listdata[[i]]$Date, 1),head(listdata[[i]]$Date, 1)), "years")
+  stats_mcap$Market.Cap[i] <- listdata[[i]][listdata[[i]]$Date == tail(listdata[[i]]$Date, 1),]$Price * listdata[[i]][listdata[[i]]$Date == tail(listdata[[i]]$Date, 1),]$`Shares Outstanding`
+}
+
+plot(stats_mcap$Market.Cap, stats_mcap$Number.of.years, xlab = "Number of years company existed", ylab = "Market Cap as of last available date")
+```
+
+# **References**
+
+1. CRSP Daily Stock data from WRDS. 

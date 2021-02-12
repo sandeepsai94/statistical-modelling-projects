@@ -1,0 +1,381 @@
+---
+title: "S&P500 Arithmetic and Geometric Returns"
+author: "Sai Sandeep Chandaluri"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+bibliography: ["ref.bib"]    
+---
+
+
+## **Question**
+
+For the (CRSP) S&P500 with dividends, what was the average arithmetic and geometric historical mean rate of return for daily returns, for monthly returns, for annual returns, and for 5-year returns from 1/1/1973 through 1/1/2015? Do the same for excess rates of return above the prevailing short rate, the 30-day Treasury rate, the 1-year Treasury rate, and the 5-year Treasury rates, respectively. This answers the questions of "how would each of these four self-financed strategies have performed?" (Does overlapping the longer-term series lead to different inference?)
+
+## **Executive Summary**
+
+Returns can vary based on the market, investment horizon and the risk the investor is exposed to. The current work attempts to understand the aggregated performance of S&P 500 index individually and in comparison with Bond markets over different time horizons. For this, we computed the historical arithmetic and geometric returns of S&P 500 index along with its excess arithmetic and geometric returns in comparison to the Fed rates for the respective period.  The periods that are considered for this work are daily, monthly, yearly and 5-year timeframes between 1/1/1973 through 1/1/2015. From Table below, the following observations have been made:
+
+1. Arithmetic return and Excess Arithmetic return show an increasing trend as the investment horizon increases. We may infer that investing in S&P 500 for longer horizons can give higher returns in comparison to shorter horizons. 
+2. From the data, we can see that the interest rates have been on a decreasing trend from 1971 to 2015 and the returns from S&P 500 are on an increasing trend and it further increases with longer time horizons. 
+3. We can see that Geometric return and excess Geometric return are almost same for different horizons. This shows that log returns are stationary in stock market and not returns. 
+4. Risk free data represents the return for the upcoming period and returns computed in S&P 500 data represents the return for the past period (hence it is important that returns of same period are used when computing excess returns).
+5. Overall, we can infer that the self-financing strategy (which is to borrow money from bond market and invest in stock market) performs well over the years and the performance is even better as investment horizon increases.
+
+## **Computation Methodology**
+
+**1. Choosing the right data:** 
+
+All the data for carrying out this work have been taken from WRDS. For S&P 500 data, we have taken the CRSP S&P 500 index data that includes value-weighted returns along with dividends. We considered this data to compute the accurate returns that can be achieved by forming a value-weighted portfolio like S&P 500 and also receive the dividends from its stocks. Also, it is easier to maintain value-weighted index compared to equal-weighted index.
+
+For the risk free rates, we have considered the Federal reserve data for daily, 1-year and 5-year interest rates (Path: Federal Reserve -> Interest Rates -> Interest rates(Federal Reserve, H15 report)) and CRSP Treasury data for monthly rates (Path: CRSP -> Annual Update -> Treasuries -> CRSP Treasuries - Monthly riskfree series). We have taken these as risk-free because of their low-risk nature and least possibility of default. The rates in the data are prevailing interest rates offered by Treasury securities on respective date based on different time horizons. Hence, we feel this is the right data for risk free rates
+
+**2. Data Transformation and required functions:**
+
+The data is cropped only to have data between the time frame under consideration. For the S&P 500 data, the cumulative returns are computed and are stored in a new column. Functions are written to consolidate returns just based on horizon (adjust_sp500) and then compute the cumulative return (sp500_return_horizon) for the specific period (daily, monthly, yearly and 5-year). Also, a function (findnyears) is written to compute the number of effective years based on the data.  
+
+**3. Computation of returns and excess returns:**
+
+Returns are computed based on the horizon using the above functions. For computing excess returns, an outer join between S&P 500 data and interest rates data is performed and data with NA values are omitted, to consider only the data when bond market is open (bond markets are open for fewer days than stock market). Also, because the risk free data represents the return for the upcoming period and returns computed in S&P 500 data represents the return for the past period, the interest rates data is transformed to shift the column down by one row. 
+
+**4. Results:**
+
+The annualized arithmetic and geometric returns/excess returns are computed. The final results are shown in the table below:
+
+```{r, echo=F, message=F, warning=F}
+library(data.table)
+library(tidyverse)
+library(magrittr)
+library(xts)
+library(dplyr)
+library(prettydoc)
+library(lubridate)
+library(xtable)
+library(kableExtra)
+options(xtable.comment = FALSE)
+
+begindate = as.Date("1972-12-29")
+enddate = as.Date("2014-12-31")
+
+
+#read the data, beginning with the S&P
+#sp500
+sp500 = fread('~/Documents/Documents/Decision Making/s&p500-hw1.csv', header = TRUE)
+
+#monthly fed rates data
+monthly = fread('~/Documents/Documents/Decision Making/monthly.csv', header = TRUE)
+monthly$KYTREASNOX <- NULL
+
+#daily fed rates data with daily, yearly and 5-year rates
+daily_yearly = fread('~/Documents/Documents/Decision Making/daily_yearly.csv', header = TRUE)
+
+#Naming the columns
+colnames(sp500) = c("date", "spdaily")
+colnames(monthly) = c("monthdate", "monthly")
+colnames(daily_yearly) = c("date", "daily", "yearly", "y_5")
+
+#Keeping only the required data between given time range
+sp500[, date:=as.Date(as.character(date), format = "%Y%m%d")]
+sp500 = sp500[date %between% c(begindate+2, enddate),]
+setkey(sp500, date)
+
+monthly = monthly[monthdate %between% c(begindate, enddate),]
+setkey(monthly, monthdate)
+
+daily_yearly[, date:=as.Date(as.character(date), format = "%Y%m%d")]
+daily_yearly = daily_yearly[date %between% c(begindate, enddate),]
+
+d = sp500
+# Computation of cumulative returns and omitting NA values
+d[,sp500leveladj := cumprod(1+spdaily)]
+d = na.omit(d)
+daily_yearly = na.omit(daily_yearly)
+monthly = na.omit(monthly)
+
+
+#compute the returns for given horizon
+adjust_sp500 = function(d){
+   d[, sp500n := sp500leveladj / shift(sp500leveladj) - 1]
+   d[1, sp500n := sp500leveladj-1]
+   d[, sp500 := sp500n]
+   d[, sp500n := NULL]
+
+   return(d)
+ }
+
+
+#consolidate returns by time horizon
+ sp500_return_horizon = function(d, horizon=NULL){
+   ep = endpoints(d$date, on=horizon)
+   n = d[ep, ]
+   return(adjust_sp500(n))
+ }
+
+
+findnyears = function(d) round((max(d$date) - min(d$date))/365.25) %>% as.integer
+
+#build the returns at each horizon
+d = adjust_sp500(d)
+m = sp500_return_horizon(d, horizon="months")
+y = sp500_return_horizon(m, horizon="years")
+every5 = seq(1, nrow(y), by = 5)
+y5 = y[every5,] %>% adjust_sp500
+
+nyears = list(
+  d=findnyears(d),
+  m=findnyears(m),
+  y=findnyears(y),
+  y5=(length(every5)-1)*5
+)
+
+#Bond markets are open for fewer dates than stock market, hence considering
+#only for dates in which bond market is open. 
+#arranging sp500 and rates for same horizon by shifting down column by one row
+monthlyexcess = m[monthly]
+monthlyexcess = na.omit(transform(monthlyexcess, monthly = c(NA, monthly[-nrow(monthlyexcess)])))
+monthlyexcess[, sp500:= sp500*100]
+monthlyexcess[,spdaily := NULL]
+monthlyexcess[,sp500leveladj := NULL]
+
+dailyexcess = d[daily_yearly]
+dailyexcess = dailyexcess[-1,]
+dailyexcess = na.omit(dailyexcess)
+dailyexcess[, sp500:= sp500*100]
+dailyexcess = dailyexcess[,-c(2,3,6,7)]
+
+yearlyexcess = y[daily_yearly]
+yearlyexcess = na.omit(yearlyexcess)
+yearlyexcess = rbind(daily_yearly[1,],yearlyexcess, fill=TRUE)
+yearlyexcess[, sp500:=sp500*100]
+yearlyexcess = na.omit(transform(yearlyexcess, yearly = c(NA, yearly[-nrow(yearlyexcess)])))
+yearlyexcess = yearlyexcess[, -c(2,4,5,6)]
+
+y5excess = y5[daily_yearly]
+y5excess = na.omit(y5excess)
+y5excess = rbind(daily_yearly[1,],y5excess, fill=TRUE)
+y5excess[, sp500:=sp500*100]
+y5excess = na.omit(transform(y5excess, y_5 = c(NA, y_5[-nrow(y5excess)])))
+y5excess = y5excess[, -c(2,3,5,6)]
+
+```
+
+```{r, size="footnotesize", echo=F, results='asis'}
+
+# matricies to store results
+res = matrix(NA, nrow = 4, ncol = 4)
+colnames(res) = c("Arithmetic SP500", "Geometric SP500", "Arithmetic Excess", "Geometric Excess")
+rownames(res)= c("Daily Returns", "Monthly Returns", "Annual Returns", "5-year Returns")
+
+# computing excess returns and cumulative excess return levels
+days_per_year = dim(d)[1] / nyears(d)
+
+dailyexcess[, excessret := sp500 - (daily/days_per_year)]
+dailyexcess[, excesslevel := cumprod(1+(excessret/100))]
+monthlyexcess[, excessret := sp500 - (monthly/12)]
+monthlyexcess[, excesslevel := cumprod(1+(excessret/100))]
+yearlyexcess[, excessret := sp500 - yearly]
+yearlyexcess[, excesslevel:= cumprod(1+(excessret/100))]
+y5excess[, excessret := sp500 - (5 * y_5)]
+y5excess[, excesslevel := cumprod(1+(excessret/100))]
+
+# enter results
+res[1, 1] = mean(d$sp500) * days_per_year
+res[2, 1] = mean(m$sp500) * 12
+res[3, 1] = mean(y$sp500) 
+res[4, 1] = mean(y5$sp500) / 5
+
+res[1, 2] = (d$sp500leveladj %>% last) ^ (1 / nyears$d) - 1
+res[2, 2] = (m$sp500leveladj %>% last) ^ (1 / nyears$m) - 1
+res[3, 2] = (y$sp500leveladj %>% last) ^ (1 / nyears$y) - 1
+res[4, 2] = (y5$sp500leveladj %>% last) ^ (1 / nyears$y5) - 1
+
+
+res[1, 3] = mean(dailyexcess$excessret) * days_per_year / 100
+res[2, 3] = mean(monthlyexcess$excessret) * 12 / 100
+res[3, 3] = mean(yearlyexcess$excessret) / 100
+res[4, 3] = mean(y5excess$excessret) / 500
+
+res[1, 4] = (dailyexcess$excesslevel %>% last) ^ (1 / nyears$d) - 1
+res[2, 4] = (monthlyexcess$excesslevel %>% last) ^ (1 / nyears$m) - 1
+res[3, 4] = (yearlyexcess$excesslevel %>% last) ^ (1 / nyears$y) - 1
+res[4, 4] = (y5excess$excesslevel %>% last) ^ (1 / nyears$y5) - 1
+
+res = res * 100
+
+kable(res, format = "markdown")
+
+```
+
+
+
+
+
+## **Code to compute the returns**
+
+```{r, echo=T, message=F, warning=F, results='hide'}
+library(data.table)
+library(tidyverse)
+library(magrittr)
+library(xts)
+library(dplyr)
+library(prettydoc)
+library(lubridate)
+library(xtable)
+library(kableExtra)
+options(xtable.comment = FALSE)
+
+begindate = as.Date("1972-12-29")
+enddate = as.Date("2014-12-31")
+
+
+#read the data, beginning with the S&P
+#sp500
+sp500 = fread('~/Documents/Documents/Decision Making/s&p500-hw1.csv', header = TRUE)
+
+#monthly fed rates data
+monthly = fread('~/Documents/Documents/Decision Making/monthly.csv', header = TRUE)
+monthly$KYTREASNOX <- NULL
+
+#daily fed rates data with daily, yearly and 5-year rates
+daily_yearly = fread('~/Documents/Documents/Decision Making/daily_yearly.csv', header = TRUE)
+
+#Naming the columns
+colnames(sp500) = c("date", "spdaily")
+colnames(monthly) = c("monthdate", "monthly")
+colnames(daily_yearly) = c("date", "daily", "yearly", "y_5")
+
+#Keeping only the required data between given time range
+sp500[, date:=as.Date(as.character(date), format = "%Y%m%d")]
+sp500 = sp500[date %between% c(begindate+2, enddate),]
+setkey(sp500, date)
+
+monthly = monthly[monthdate %between% c(begindate, enddate),]
+setkey(monthly, monthdate)
+
+daily_yearly[, date:=as.Date(as.character(date), format = "%Y%m%d")]
+daily_yearly = daily_yearly[date %between% c(begindate, enddate),]
+
+d = sp500
+# Computation of cumulative returns and omitting NA values
+d[,sp500leveladj := cumprod(1+spdaily)]
+d = na.omit(d)
+daily_yearly = na.omit(daily_yearly)
+monthly = na.omit(monthly)
+
+
+#compute the returns for given horizon
+adjust_sp500 = function(d){
+   d[, sp500n := sp500leveladj / shift(sp500leveladj) - 1]
+   d[1, sp500n := sp500leveladj-1]
+   d[, sp500 := sp500n]
+   d[, sp500n := NULL]
+
+   return(d)
+ }
+
+
+#consolidate returns by time horizon
+ sp500_return_horizon = function(d, horizon=NULL){
+   ep = endpoints(d$date, on=horizon)
+   n = d[ep, ]
+   return(adjust_sp500(n))
+ }
+
+
+findnyears = function(d) round((max(d$date) - min(d$date))/365.25) %>% as.integer
+
+#build the returns at each horizon
+d = adjust_sp500(d)
+m = sp500_return_horizon(d, horizon="months")
+y = sp500_return_horizon(m, horizon="years")
+every5 = seq(1, nrow(y), by = 5)
+y5 = y[every5,] %>% adjust_sp500
+
+nyears = list(
+  d=findnyears(d),
+  m=findnyears(m),
+  y=findnyears(y),
+  y5=(length(every5)-1)*5
+)
+
+#Bond markets are open for fewer dates than stock market, hence considering
+#only for dates in which bond market is open. 
+#arranging sp500 and rates for same horizon by shifting down column by one row
+monthlyexcess = m[monthly]
+monthlyexcess = na.omit(transform(monthlyexcess, monthly = c(NA, monthly[-nrow(monthlyexcess)])))
+monthlyexcess[, sp500:= sp500*100]
+monthlyexcess[,spdaily := NULL]
+monthlyexcess[,sp500leveladj := NULL]
+
+dailyexcess = d[daily_yearly]
+dailyexcess = dailyexcess[-1,]
+dailyexcess = na.omit(dailyexcess)
+dailyexcess[, sp500:= sp500*100]
+dailyexcess = dailyexcess[,-c(2,3,6,7)]
+
+yearlyexcess = y[daily_yearly]
+yearlyexcess = na.omit(yearlyexcess)
+yearlyexcess = rbind(daily_yearly[1,],yearlyexcess, fill=TRUE)
+yearlyexcess[, sp500:=sp500*100]
+yearlyexcess = na.omit(transform(yearlyexcess, yearly = c(NA, yearly[-nrow(yearlyexcess)])))
+yearlyexcess = yearlyexcess[, -c(2,4,5,6)]
+
+y5excess = y5[daily_yearly]
+y5excess = na.omit(y5excess)
+y5excess = rbind(daily_yearly[1,],y5excess, fill=TRUE)
+y5excess[, sp500:=sp500*100]
+y5excess = na.omit(transform(y5excess, y_5 = c(NA, y_5[-nrow(y5excess)])))
+y5excess = y5excess[, -c(2,3,5,6)]
+
+```
+
+```{r, size="footnotesize", echo=T, results='hide', message=F, warning=F}
+
+# matricies to store results
+res = matrix(NA, nrow = 4, ncol = 4)
+colnames(res) = c("Arithmetic SP500", "Geometric SP500", "Arithmetic Excess", "Geometric Excess")
+rownames(res)= c("Daily Returns", "Monthly Returns", "Annual Returns", "5-year Returns")
+
+# computing excess returns and cumulative excess return levels
+days_per_year = dim(d)[1] / nyears(d)
+
+dailyexcess[, excessret := sp500 - (daily/days_per_year)]
+dailyexcess[, excesslevel := cumprod(1+(excessret/100))]
+monthlyexcess[, excessret := sp500 - (monthly/12)]
+monthlyexcess[, excesslevel := cumprod(1+(excessret/100))]
+yearlyexcess[, excessret := sp500 - yearly]
+yearlyexcess[, excesslevel:= cumprod(1+(excessret/100))]
+y5excess[, excessret := sp500 - (5 * y_5)]
+y5excess[, excesslevel := cumprod(1+(excessret/100))]
+
+# enter results
+res[1, 1] = mean(d$sp500) * days_per_year
+res[2, 1] = mean(m$sp500) * 12
+res[3, 1] = mean(y$sp500) 
+res[4, 1] = mean(y5$sp500) / 5
+
+res[1, 2] = (d$sp500leveladj %>% last) ^ (1 / nyears$d) - 1
+res[2, 2] = (m$sp500leveladj %>% last) ^ (1 / nyears$m) - 1
+res[3, 2] = (y$sp500leveladj %>% last) ^ (1 / nyears$y) - 1
+res[4, 2] = (y5$sp500leveladj %>% last) ^ (1 / nyears$y5) - 1
+
+
+res[1, 3] = mean(dailyexcess$excessret) * days_per_year / 100
+res[2, 3] = mean(monthlyexcess$excessret) * 12 / 100
+res[3, 3] = mean(yearlyexcess$excessret) / 100
+res[4, 3] = mean(y5excess$excessret) / 500
+
+res[1, 4] = (dailyexcess$excesslevel %>% last) ^ (1 / nyears$d) - 1
+res[2, 4] = (monthlyexcess$excesslevel %>% last) ^ (1 / nyears$m) - 1
+res[3, 4] = (yearlyexcess$excesslevel %>% last) ^ (1 / nyears$y) - 1
+res[4, 4] = (y5excess$excesslevel %>% last) ^ (1 / nyears$y5) - 1
+
+res = res * 100
+
+kable(res, format = "markdown")
+```
+
+
+# **References**
+
+-@R-base

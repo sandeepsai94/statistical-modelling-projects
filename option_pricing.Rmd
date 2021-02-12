@@ -1,0 +1,577 @@
+---
+title: "Option Pricing"
+description: "This project aims to create multiple option pricing models using different techniques for different use cases"
+output:
+  html_document:
+    df_print: paged
+  prettydoc::html_pretty:
+    theme: architect
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(knitr)    
+library(png)  
+library(prettydoc)
+```
+
+
+## 1 Pricing European Options
+
+```{r, results='asis'}
+European_call <- function(S0, K, r, h, N, sigma, dividend) {
+    dividend <- ifelse(dividend<0, 0, dividend)
+    u <- exp(((r-dividend)*h) + (sigma*sqrt(h)))
+    d <- exp(((r-dividend)*h) - (sigma*sqrt(h)))
+    S <- vector(mode = "list", length = N+1);
+    S[[N+1]][1] <- 0
+    option <- vector(mode = "list", length = N+1);
+    option[[N+1]][1] <- 0;
+    delta <- vector(mode = "list", length = N+1);
+    delta[[N+1]][1] <- 0;
+    B <- vector(mode = "list", length = N+1);
+    B[[N+1]][1] <- 0;
+    S[[1]][1] <- S0;
+    for (i in (N+1):1) {
+        for (j in 1:i) {
+            S[[i]][j] <- S0 * (u^(i-j))*(d^(j-1));
+            if(i == N+1) { 
+                option[[i]][j] <- max(S[[i]][j]-K, 0);
+                delta[[i]][j] <- 0;
+                B[[i]][j] <- 0;
+            } else {
+                option[[i]][j] <- exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) + 
+                                                   (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d)));
+                delta[[i]][j] <- (option[[i+1]][j] - option[[i+1]][j+1]) / (S[[i]][j]*(u-d));
+                B[[i]][j] <- exp(-r*h) * (((option[[i+1]][j+1]*u) - (option[[i+1]][j]*d)) / (u-d));
+                
+            }
+        }
+    }
+    p <- (exp(r*h)-d) / (u-d)
+    S_v <- S[[1]]
+    option_v <- option[[1]]
+    delta_v <- delta[[1]]
+    B_v <- B[[1]]
+    T_v <- 0
+    for (i in 2:(N+1)) {
+        S_v <- S_v %>% append(S[[i]])
+        option_v <- option_v %>% append(option[[i]])
+        delta_v <- delta_v %>% append(delta[[i]])
+        B_v <- B_v %>% append(B[[i]])
+        T_v <- T_v %>% append(rep(h*(i-1), times=i))
+    }
+    output <- data.frame(T_v, S_v, option_v, delta_v, B_v, "u" = rep(u, times = length(B_v)), 
+                         "d" = rep(d, times = length(B_v)), "p_star" = rep(p, times = length(B_v)))
+    return(output)
+}
+
+European_put <- function(S0, K, r, h, N, sigma, dividend) {
+    dividend <- ifelse(dividend<0, 0, dividend)
+    u <- exp(((r-dividend)*h) + (sigma*sqrt(h)))
+    d <- exp(((r-dividend)*h) - (sigma*sqrt(h)))
+    S <- vector(mode = "list", length = N+1);
+    S[[N+1]][1] <- 0
+    option <- vector(mode = "list", length = N+1);
+    option[[N+1]][1] <- 0;
+    delta <- vector(mode = "list", length = N+1);
+    delta[[N+1]][1] <- 0;
+    B <- vector(mode = "list", length = N+1);
+    B[[N+1]][1] <- 0;
+    S[[1]][1] <- S0;
+    for (i in (N+1):1) {
+        for (j in 1:i) {
+            S[[i]][j] <- S0 * (u^(i-j))*(d^(j-1));
+            if(i == N+1) { 
+                option[[i]][j] <- max(K-S[[i]][j], 0);
+                delta[[i]][j] <- 0;
+                B[[i]][j] <- 0;
+            } else {
+                option[[i]][j] <- exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) + 
+                                                   (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d)));
+                delta[[i]][j] <- (option[[i+1]][j] - option[[i+1]][j+1]) / (S[[i]][j]*(u-d));
+                B[[i]][j] <- exp(-r*h) * (((option[[i+1]][j+1]*u) - (option[[i+1]][j]*d)) / (u-d));
+                
+            }
+        }
+    }
+    p <- (exp(r*h)-d) / (u-d)
+    S_v <- S[[1]]
+    option_v <- option[[1]]
+    delta_v <- delta[[1]]
+    B_v <- B[[1]]
+    T_v <- 0
+    for (i in 2:(N+1)) {
+        S_v <- S_v %>% append(S[[i]])
+        option_v <- option_v %>% append(option[[i]])
+        delta_v <- delta_v %>% append(delta[[i]])
+        B_v <- B_v %>% append(B[[i]])
+        T_v <- T_v %>% append(rep(h*(i-1), times=i))
+    }
+    output <- data.frame(T_v, S_v, option_v, delta_v, B_v, "u" = rep(u, times = length(B_v)), 
+                         "d" = rep(d, times = length(B_v)), "p_star" = rep(p, times = length(B_v)))
+    return(output)
+}
+
+e_straddle <- function(S0, K, r, h, N, sigma, dividend) {
+    dividend <- ifelse(dividend<0, 0, dividend)
+    u <- exp(((r-dividend)*h) + (sigma*sqrt(h)))
+    d <- exp(((r-dividend)*h) - (sigma*sqrt(h)))
+    S <- vector(mode = "list", length = N+1);
+    S[[N+1]][1] <- 0
+    option <- vector(mode = "list", length = N+1);
+    option[[N+1]][1] <- 0;
+    delta <- vector(mode = "list", length = N+1);
+    delta[[N+1]][1] <- 0;
+    B <- vector(mode = "list", length = N+1);
+    B[[N+1]][1] <- 0;
+    S[[1]][1] <- S0;
+    for (i in (N+1):1) {
+        for (j in 1:i) {
+            S[[i]][j] <- S0 * (u^(i-j))*(d^(j-1));
+            if(i == N+1) { 
+                option[[i]][j] <- (max(S[[i]][j]-K, 0) + max(K-S[[i]][j], 0));
+                delta[[i]][j] <- 0;
+                B[[i]][j] <- 0;
+            } else {
+                option[[i]][j] <- exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) + 
+                                                       (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d)));
+                delta[[i]][j] <- (option[[i+1]][j] - option[[i+1]][j+1]) / (S[[i]][j]*(u-d));
+                B[[i]][j] <- exp(-r*h) * (((option[[i+1]][j+1]*u) - (option[[i+1]][j]*d)) / (u-d));
+            }
+        }
+    }
+    p <- (exp(r*h)-d) / (u-d)
+    S_v <- S[[1]]
+    option_v <- option[[1]]
+    delta_v <- delta[[1]]
+    B_v <- B[[1]]
+    T_v <- 0
+    for (i in 2:(N+1)) {
+        S_v <- S_v %>% append(S[[i]])
+        option_v <- option_v %>% append(option[[i]])
+        delta_v <- delta_v %>% append(delta[[i]])
+        B_v <- B_v %>% append(B[[i]])
+        T_v <- T_v %>% append(rep(h*(i-1), times=i))
+    }
+    output <- data.frame(T_v, S_v, option_v, delta_v, B_v, "u" = rep(u, times = length(B_v)), 
+                         "d" = rep(d, times = length(B_v)), "p_star" = rep(p, times = length(B_v)))
+    return(output)
+}
+```
+
+1. 
+```{r}
+e_straddle(100, 90, 0.02, 0.25, 4, 0.2, 0)
+```
+
+2. 
+```{r}
+e_straddle(100, 90, 0.02, 0.025, 40, 0.2, 0)
+```
+
+3.
+```{r}
+European_call(100, 90, 0.02, 0.25, 4, 0.2, 0)
+```
+
+## 2 Pricing American Options
+
+```{r, results='asis'}
+American_call <- function(S0, K, r, h, N, sigma, dividend) {
+    dividend <- ifelse(dividend<0, 0, dividend)
+    u <- exp(((r-dividend)*h) + (sigma*sqrt(h)))
+    d <- exp(((r-dividend)*h) - (sigma*sqrt(h)))
+    S <- vector(mode = "list", length = N+1);
+    S[[N+1]][1] <- 0
+    ex <- vector(mode = "list", length = N+1);
+    ex[[N+1]][1] <- "Not Executed Early"
+    option <- vector(mode = "list", length = N+1);
+    option[[N+1]][1] <- 0;
+    delta <- vector(mode = "list", length = N+1);
+    delta[[N+1]][1] <- 0;
+    B <- vector(mode = "list", length = N+1);
+    B[[N+1]][1] <- 0;
+    S[[1]][1] <- S0;
+    for (i in (N+1):1) {
+        for (j in 1:i) {
+            S[[i]][j] <- S0 * (u^(i-j))*(d^(j-1));
+            if(i == N+1) { 
+                option[[i]][j] <- max(S[[i]][j]-K, 0);
+                delta[[i]][j] <- 0;
+                B[[i]][j] <- 0;
+                ex[[i]][j] <- "Expiration";
+            } else {
+                if(exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) + 
+                                (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d))) >=
+                   max(S[[i]][j]-K, 0)) {
+                    option[[i]][j] <- exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) + 
+                                                       (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d)));
+                    ex[[i]][j] <- "Not Executed Early";
+                } else {
+                    option[[i]][j] <- max(S[[i]][j]-K, 0);
+                    ex[[i]][j] <- "Executed Early";
+                }
+                delta[[i]][j] <- (option[[i+1]][j] - option[[i+1]][j+1]) / (S[[i]][j]*(u-d));
+                B[[i]][j] <- exp(-r*h) * (((option[[i+1]][j+1]*u) - (option[[i+1]][j]*d)) / (u-d));
+                
+            }
+        }
+    }
+    p <- (exp(r*h)-d) / (u-d)
+    ex_v <- ex[[1]]
+    S_v <- S[[1]]
+    option_v <- option[[1]]
+    delta_v <- delta[[1]]
+    B_v <- B[[1]]
+    T_v <- 0
+    for (i in 2:(N+1)) {
+        ex_v <- ex_v %>% append(ex[[i]])
+        S_v <- S_v %>% append(S[[i]])
+        option_v <- option_v %>% append(option[[i]])
+        delta_v <- delta_v %>% append(delta[[i]])
+        B_v <- B_v %>% append(B[[i]])
+        T_v <- T_v %>% append(rep(h*(i-1), times=i))
+    }
+    output <- data.frame(T_v, S_v, option_v, delta_v, B_v, ex_v, "u" = rep(u, times = length(B_v)), 
+                         "d" = rep(d, times = length(B_v)), "p_star" = rep(p, times = length(B_v)))
+    return(output)
+}
+
+American_call(10, 10, 0.01, 1/365, 250, 0.15, 0)
+```
+
+## 3 Discrete Dividends
+
+```{r}
+American_call <- function(S0, K, r, h, N, sigma, dividend, dt) {
+    dividend <- ifelse(dividend<0, 0, dividend)
+    u <- exp(sigma*sqrt(h))
+    d <- 1/u
+    S <- vector(mode = "list", length = N+1);
+    S[[N+1]][1] <- 0
+    ex <- vector(mode = "list", length = N+1);
+    ex[[N+1]][1] <- "Not Executed Early"
+    option <- vector(mode = "list", length = N+1);
+    option[[N+1]][1] <- 0;
+    delta <- vector(mode = "list", length = N+1);
+    delta[[N+1]][1] <- 0;
+    B <- vector(mode = "list", length = N+1);
+    B[[N+1]][1] <- 0;
+    S[[1]][1] <- S0;
+    for (i in 2:(N+1)) {
+        for (j in 1:i) {
+            if (i == j) {
+                if (i %in% dt) {
+                    S[[i]][j] <- (1 - dividend) * S[[i-1]][j-1] * d;
+                } else {
+                     S[[i]][j] <- S[[i-1]][j-1] * d;
+                }
+            } else {
+                if (i %in% dt) {
+                    S[[i]][j] <- (1 - dividend) * S[[i-1]][j] * u;
+                } else {
+                     S[[i]][j] <- S[[i-1]][j] * u;
+                }
+            }
+        }
+    }
+    for (i in (N+1):1) {
+        for (j in 1:i) {
+            if(i == N+1) { 
+                option[[i]][j] <- max(S[[i]][j]-K, 0);
+                delta[[i]][j] <- 0;
+                B[[i]][j] <- 0;
+                ex[[i]][j] <- "Expiration";
+            } else {
+                if(exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) +
+                                (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d))) >=
+                   max(S[[i]][j]-K, 0)) {
+                    option[[i]][j] <- exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) +
+                                                       (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d)));
+                    ex[[i]][j] <- "Not Executed Early";
+                } else {
+                    option[[i]][j] <- max(S[[i]][j]-K, 0);
+                    ex[[i]][j] <- "Executed Early";
+                }
+                delta[[i]][j] <- (option[[i+1]][j] - option[[i+1]][j+1]) / (S[[i]][j]*(u-d));
+                B[[i]][j] <- exp(-r*h) * (((option[[i+1]][j+1]*u) - (option[[i+1]][j]*d)) / (u-d));
+            }
+        }
+    }
+    return(option[[1]])
+}
+
+American_put <- function(S0, K, r, h, N, sigma, dividend, dt) {
+    dividend <- ifelse(dividend<0, 0, dividend)
+    u <- exp(((r-dividend)*h) + (sigma*sqrt(h)))
+    d <- exp(((r-dividend)*h) - (sigma*sqrt(h)))
+    S <- vector(mode = "list", length = N+1);
+    S[[N+1]][1] <- 0
+    ex <- vector(mode = "list", length = N+1);
+    ex[[N+1]][1] <- "Not Executed Early"
+    option <- vector(mode = "list", length = N+1);
+    option[[N+1]][1] <- 0;
+    delta <- vector(mode = "list", length = N+1);
+    delta[[N+1]][1] <- 0;
+    B <- vector(mode = "list", length = N+1);
+    B[[N+1]][1] <- 0;
+    S[[1]][1] <- S0;
+    for (i in 2:(N+1)) {
+        for (j in 1:i) {
+            if (i == j) {
+                if (i %in% dt) {
+                    S[[i]][j] <- (1 - dividend) * S[[i-1]][j-1] * d;
+                } else {
+                     S[[i]][j] <- S[[i-1]][j-1] * d;
+                }
+            } else {
+                if (i %in% dt) {
+                    S[[i]][j] <- (1 - dividend) * S[[i-1]][j] * u;
+                } else {
+                     S[[i]][j] <- S[[i-1]][j] * u;
+                }
+            }
+        }
+    }
+    for (i in (N+1):1) {
+        for (j in 1:i) {
+            if(i == N+1) { 
+                option[[i]][j] <- max(K-S[[i]][j], 0);
+                delta[[i]][j] <- 0;
+                B[[i]][j] <- 0;
+                ex[[i]][j] <- "Expiration";
+            } else {
+                if(exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) + 
+                                (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d))) >=
+                   max(K-S[[i]][j], 0)) {
+                    option[[i]][j] <- exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) + 
+                                                       (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d)));
+                    ex[[i]][j] <- "Not Executed Early";
+                } else {
+                    option[[i]][j] <- max(K-S[[i]][j], 0);
+                    ex[[i]][j] <- "Executed Early";
+                }
+                delta[[i]][j] <- (option[[i+1]][j] - option[[i+1]][j+1]) / (S[[i]][j]*(u-d));
+                B[[i]][j] <- exp(-r*h) * (((option[[i+1]][j+1]*u) - (option[[i+1]][j]*d)) / (u-d));
+                
+            }
+        }
+    }
+    return(option[[1]])
+}
+
+
+straddle <- function(S0, K, r, h, N, sigma, dividend, dt) {
+    dividend <- ifelse(dividend<0, 0, dividend)
+    u <- exp(((r-dividend)*h) + (sigma*sqrt(h)))
+    d <- exp(((r-dividend)*h) - (sigma*sqrt(h)))
+    S <- vector(mode = "list", length = N+1);
+    S[[N+1]][1] <- 0
+    option <- vector(mode = "list", length = N+1);
+    option[[N+1]][1] <- 0;
+    delta <- vector(mode = "list", length = N+1);
+    delta[[N+1]][1] <- 0;
+    B <- vector(mode = "list", length = N+1);
+    B[[N+1]][1] <- 0;
+    S[[1]][1] <- S0;
+    for (i in 2:(N+1)) {
+        for (j in 1:i) {
+            if (i == j) {
+                if (i %in% dt) {
+                    S[[i]][j] <- (1 - dividend) * S[[i-1]][j-1] * d;
+                } else {
+                     S[[i]][j] <- S[[i-1]][j-1] * d;
+                }
+            } else {
+                if (i %in% dt) {
+                    S[[i]][j] <- (1 - dividend) * S[[i-1]][j] * u;
+                } else {
+                     S[[i]][j] <- S[[i-1]][j] * u;
+                }
+            }
+        }
+    }
+    for (i in (N+1):1) {
+        for (j in 1:i) {
+            if(i == N+1) { 
+                option[[i]][j] <- (max(S[[i]][j]-K, 0) + max(K-S[[i]][j], 0));
+                delta[[i]][j] <- 0;
+                B[[i]][j] <- 0;
+            } else {
+                if(exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) + 
+                                (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d))) >=
+                   (max(S[[i]][j]-K, 0) + max(K-S[[i]][j], 0))) {
+                    option[[i]][j] <- exp(-r*h) * ((option[[i+1]][j] * (exp((r-dividend)*h)-d) / (u-d)) + 
+                                                       (option[[i+1]][j+1] * (u-exp((r-dividend)*h)) / (u-d)));
+                } else {
+                    option[[i]][j] <- (max(S[[i]][j]-K, 0) + max(K-S[[i]][j], 0));
+                }
+                delta[[i]][j] <- (option[[i+1]][j] - option[[i+1]][j+1]) / (S[[i]][j]*(u-d));
+                B[[i]][j] <- exp(-r*h) * (((option[[i+1]][j+1]*u) - (option[[i+1]][j]*d)) / (u-d));
+            }
+        }
+    }
+    return(option[[1]])
+}
+```
+
+1. 
+```{r}
+American_call(10, 10, 0.02, 1/365, 200, 0.2, 0.05, c(50, 100, 150))
+
+American_put(10, 10, 0.02, 1/365, 200, 0.2, 0.05, c(50, 100, 150))
+```
+
+2. 
+```{r}
+straddle(10, 10, 0.02, 1/365, 200, 0.2, 0.05, c(50, 100, 150))
+```
+Since the American call should never be exercised, the optimal exercise rule of the American straddle implies that upon exercising you lose the difference between the value of the call and its intrinsic value. These loses percolate back to the initial node and imply that the American straddle is worth less than the portfolio of American options.
+
+## 4 Pricing Asian Options by Monte Carlo
+
+```{r}
+Asian_Option <- function(s,k,r,t,n,div=0,sd=0){
+  
+  S <- 0
+  C <- 0
+  h <- t/n
+  
+for(j in 1:1000){
+  S <- 0
+  for (i in 1:n) {
+    if(i==1){
+      S[i] <- s*exp((r-((sd)^2/2))*h + (sd*sqrt(h)*rnorm(1,0,1)))
+    }else{
+      S[i] <- S[i-1]*exp((r-((sd)^2/2))*h + (sd*sqrt(h)*rnorm(1,0,1)))
+    }
+  }
+  C[j] <- max(mean(S)-k,0)
+}
+  return(mean(C)*exp(-r))
+}
+
+sd <- 0.2
+Asian_Call <- Asian_Option(200,220,0.02,1,365,0,0.2)
+Asian_Call
+Asian_Call_ConfInt_Up <- Asian_Call + qnorm(0.975)*(sd/sqrt(100000))
+Asian_Call_ConfInt_Up
+Asian_Call_ConfInt_Down <- Asian_Call - qnorm(0.975)*(sd/sqrt(100000))
+Asian_Call_ConfInt_Down
+```
+
+## 5 Pricing American Options using the Longstaff and Schwartz LeastSquare Method
+
+```{r}
+
+S0 <- 200
+K <- 220
+
+generate_monte_carlo<-function(N, paths)
+{
+  interval<-1/N
+  mean <- 0.06
+  sigma <- 0.2
+  S<-matrix(0,nrow=(N+1),ncol=paths)
+  for(i in 1:paths)
+  {
+    S[1,i]<- S0
+    for(j in 2:(N+1))
+    {
+      S[j,i]<-S[j-1,i]*exp(interval*(mean-((sigma)^2)/2)+((interval)^.5)*rnorm(1)*sigma)
+    }
+  }
+  return(S)
+  }
+
+longstaff_schwartz <- function(ey, x, N){
+  
+  ey <- exp(-0.1/N) * ey
+  df <- data.frame(x, x2 = x^2, ey)
+  out <- lm(ey ~ x + x2, data = df)
+  return(out)
+}
+
+calculate_call_price <- function(N, paths){
+C<-matrix(0,nrow=N,ncol=paths)
+S <- generate_monte_carlo(N, paths) 
+calllist <- list()
+pricelist <- list()
+prevcallist <- list()
+
+
+for (i in N:2) {
+  for (j in 1:paths) {
+    if (i == N) {
+    C[i,j] = max(K - S[i+1,j], 0)
+    }
+    C[i-1,j] = max(K - S[i,j], 0)
+  }
+  for (j in 1:paths) {
+    if (C[i-1, j] > 0) {
+    calllist[j] <- C[i-1, j]
+    pricelist[j] <- S[i, j]
+    prevcallist[j] <- C[i, j]
+    }
+  }
+  calllist <- calllist[!sapply(calllist,is.null)]
+  pricelist <- pricelist[!sapply(pricelist,is.null)]
+  prevcallist <- prevcallist[!sapply(prevcallist,is.null)]
+
+  calldf <- t(as.data.frame(calllist))
+  pricedf <- t(as.data.frame(pricelist))
+  prevcalldf <- t(as.data.frame(prevcallist))
+  outdf <- longstaff_schwartz(prevcalldf, pricedf, N)
+  
+  for (j in 1:paths) {
+    if (C[i-1, j] > (outdf$coefficients[1] + outdf$coefficients[2] * S[i,j] + outdf$coefficients[3] * S[i,j]^2)){
+      C[i:N,j] <- 0
+    }else{
+      C[i-1, j] <- 0
+    }
+  }
+  
+}
+total <- list()
+for (i in 1:N) {
+  total[i] <- sum(C[i,]) * exp(-i*0.1/N)
+}
+
+total <- total[!sapply(total,is.null)]
+total <- t(as.data.frame(total))
+call_price <- sum(total)/paths
+call_price
+}
+```
+
+1. N = 250 and paths = 100000.
+
+```{r}
+#calculate_call_price(250, 100000)
+```
+
+2. N = 250 and paths = 10, 100, 1000, 10000, 100000.  
+
+```{r}
+calculate_call_price(250, 10)
+calculate_call_price(250, 100)
+calculate_call_price(250, 1000)
+#calculate_call_price(250, 10000)
+#calculate_call_price(250, 100000)
+```
+
+3. N = 3, 10, 100, 250, 100000 and paths = 100000.
+
+```{r}
+calculate_call_price(3, 100000)
+#calculate_call_price(10, 100000)
+#calculate_call_price(100, 100000)
+#calculate_call_price(250, 100000)
+#calculate_call_price(1000, 100000)
+```
+PS: Please note that in the above, the actual runs are not performed for paths = 10000 and 100000 in sections 1 & 2 and for N = 10, 100, 250, 1000 in section 3 due to long run times. 
+
+

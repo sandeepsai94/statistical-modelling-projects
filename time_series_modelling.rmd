@@ -1,0 +1,223 @@
+---
+output: pdf_document
+graphics: yes
+header-includes:
+    - \usepackage{tabu}
+    - \usepackage{amssymb, amsmath, amsthm}
+    - \usepackage{enumerate}
+    - \renewcommand{\P}{\textrm{P}}
+    - \newcommand{\R}{\mathbb{R}}
+    - \newcommand{\E}{\mathbb{E}}
+    - \newcommand{\var}{{\rm Var}}
+    - \newcommand{\cov}{{\rm Cov}}
+    - \newcommand{\iid}{\stackrel{iid}{\sim}}
+    - \newcommand{\N}{\mathcal{N}}
+---
+\noindent \begin{tabu} to \textwidth {@{}X[4 l] @{}X[r]}
+  \textbf{Time Series Models} 	       & \\ 
+  \textbf{Econometrics} & \\ 
+  \textbf{Sai Sandeep Chandaluri}		   & 
+\end{tabu}
+
+
+## Question 1
+
+Apple stock prices are retrieved and autocorrelations of difference log prices are plotted.
+
+```{r, warning = FALSE, message=FALSE}
+library(quantmod)
+getSymbols("AAPL")
+```
+
+```{r,}
+lnAAPLClose = log(AAPL[,4])
+
+acf(diff(lnAAPLClose), na.action = na.pass)
+```
+
+
+## Question 2
+
+a. A linear time trend: $y_t = \alpha + \beta t + \varepsilon_t$
+
+```{r}
+t=1:50
+y = 2 + 3*t + rnorm(50, sd = 4)
+
+summary(lm(y~t))
+plot(y, type="l", xlab="Time"); points(y, pch=18, cex = 0.8, col = "blue")
+
+```
+\newline
+
+b. An AR(1): $y_t = \alpha + \beta y_{t-1} + \varepsilon_t$
+
+```{r}
+library(DataAnalytics)
+Y = double(100)
+Y[1] = 0
+for (i in seq(1,100,1)){
+Y[i+1] = 0.1 + 0.8*Y[i] + rnorm(1, sd = 0.3)
+}
+lmSumm(lm(Y~back(Y)))
+plot(Y ~ back(Y),pch=20, col="blue")
+plot(Y, type="l", xlab="Time", ylab="Y"); points(Y, pch=20, cex = 0.8, col = "red")
+```
+\newline
+
+c. A random walk: $y_t = y_{t-1} + \varepsilon_t$
+
+```{r}
+library(DataAnalytics)
+Z = double(100)
+Z[1] <- 0
+for (i in seq(1,100,1)){
+Z[i+1] = Z[i] + rnorm(1, sd = 0.4)
+}
+lmSumm(lm(Z~back(Z)))
+plot(Z ~ back(Z),pch=20, col="blue")
+plot(Z, type="l", xlab="Time", ylab="Y"); points(Z, pch=20, cex = 0.8, col = "red")
+
+```
+
+
+## Question 3
+
+a. Regression using three lags:
+
+```{r}
+data("beerprod")
+reg = lm(beerprod$b_prod~back(beerprod$b_prod)+back(beerprod$b_prod,6)+back(beerprod$b_prod,12),data=beerprod)
+lmSumm(reg)
+```
+b. From the ACF plot for residuals, we can see that there is no autocorrelation left. This is also evident from Box-Ljung test, with a p-value of 0.4799, we fail to reject the null hypothesis (Autocorrelation is zero between beer production and residuals for lag of 20 periods together). Hence, almost all the predictability in lag periods is absorbed into regression.
+
+```{r}
+
+acf(reg$residuals, lag=20)
+
+Box.test(reg$res, type = "Ljung", lag = 20)
+
+```
+
+c.
+
+```{r}
+data("beerprod")
+n = length(beerprod$b_prod)
+
+b0 <- reg$coefficients[1]
+b1 <- reg$coefficients[2]
+b2 <- reg$coefficients[3]
+b3 <- reg$coefficients[4]
+
+beer_pred = beerprod$b_prod
+
+for (i in 1:20){
+  
+  beer_pred[72+i] = b0 + b1*beer_pred[72-1+i] + b2*beer_pred[72-6+i] + b3*beer_pred[72-12+i]
+  
+}
+t=seq(length(beer_pred))
+plot(t, beer_pred, pch=20, col=ifelse(t>72, "blue", "red"), xlab="Time", ylab="Beer Production")
+lines(beer_pred)  
+
+
+```
+
+
+## Question 4
+
+a. We know that:
+
+$$\beta = \rho * \frac{\sigma_y}{\sigma_x}$$
+Assuming that AR(1) model is stationary, we can say the time series has a constant variance. Hence, standard deviation of dependent variable $\sigma_y$ is equal to the standard deviation of its lag $\sigma_x$.
+
+Therefore, we can prove that $\beta = \rho$, for a stationary AR(1) model. 
+
+b. In the lecture slides for Chapter 4, slide 19 states, "if all the true autocorrelations are 0, then the standard deviation of the sample autocorrelations is about $1/\sqrt{T}$". Prove this for an AR(1) model.  (Hint: recall the formula for $s_{b_1}$ from the Chapter 1 slides.)
+
+We know that:
+
+$$s_{b_1} = \sqrt{\frac{s^2}{(T-1)s_x^2}}$$
+From (a), we can see that $\beta = \rho$. Hence, the standard deviation of sample autocorrelations is same as the expected standard deviation (i.e, standard error) of coefficient on the lagged dependent variable.
+
+Also, since all the true autocorrelations are 0, all the variablity in the dependent variable is only due to the error term. Mathematically, for an AR(1) model,
+
+$$y_t = \beta_0 + \beta_1 y_{t-1} + \varepsilon$$
+Taking variance to the above equation, we get
+
+$$\sigma_y^2 = \frac{\sigma^2}{1-\beta_1^2}$$
+
+Applying the fact that $\sigma_y = \sigma_x$ above for AR(1) model and taking for sample, we get
+
+$$s_x^2 = \frac{s^2}{1-b_1^2}$$
+We know, $b = \rho = 0$ here. Hence, $s_x = s$. Using this result for $s_{b_1}$ above, we get 
+
+$$s_{b_1} = \sqrt{\frac{1}{(T-1)}}$$
+So for large sample sizes, we can prove that standard deviation of the sample autocorrelations is about $1/\sqrt{T}$
+
+## Question 5
+
+Let's explore the log transformation to address nonlinearity and heterogeneity using the `diamonds` dataset in the `ggplot2` package. Because this is a large dataset, we will focus only on the subset of the data where the cut is "ideal" and the color is "D". Thus, for this question, you should be working with 2,834 data points.
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+data("diamonds")
+
+diamonds <- filter(diamonds, cut == "Ideal", color == 'D')
+```
+a) Plot of (1) carat vs price, and (2) log(carat) vs log(price)
+
+```{r}
+
+par(mfrow=c(1,2))
+plot(diamonds$price ~ diamonds$carat ,pch=20, col="blue", xlab = "Carat", ylab = "Price")
+plot(log(diamonds$price) ~ log(diamonds$carat) ,pch=20, col="blue", xlab = "log(Carat)", ylab = "log(Price)")
+
+```
+
+b) 
+
+```{r}
+
+lmSumm(lm(log(price) ~ log(carat) + clarity, data = diamonds))
+
+```
+
+We can see that the Levels: I1 < SI2 < SI1 < VS2 < VS1 < VVS2 < VVS1 < IF
+
+For unit change in 'IF' clarity, log(Price) changes by 0.064 
+For unit change in 'SI2' clarity, log(Price) changes by 1.163 
+
+Price premium of 'IF' over 'SI2': $e^{1.099}$ =  3 times.
+
+
+c) 
+```{r}
+diamonds_others <- filter(diamonds, clarity  %in% c("I1","SI2","VS2","VS1","VVS2","VVS1"))
+diamonds_IF <- filter(diamonds, clarity == "IF")
+diamonds_SI1 <- filter(diamonds, clarity == "SI1")
+ df <- data.frame(
+        y = log(diamonds_others$price),
+        x = log(diamonds_others$carat),
+        clarity = diamonds_others$clarity
+    )
+ df1 <- data.frame(
+       y1 = log(diamonds_IF$price),
+       x1 = log(diamonds_IF$carat),
+       clarity = diamonds_IF$clarity
+    )
+ 
+ df2 <- data.frame(
+       y1 = log(diamonds_SI1$price),
+       x1 = log(diamonds_SI1$carat),
+       clarity = diamonds_SI1$clarity
+    )
+ 
+
+p <- ggplot()+geom_point(data = df, aes(x = x,y = y, colour=clarity))+ scale_color_manual(values = c("I1" = "grey", "SI2" = "yellow", "VS2"="black", "VS1"="magenta","VVS2"="green","VVS1"="orange","IF"="red","SI1" = "blue")) +geom_point(data = df2, aes(x = x1,y = y1, colour=clarity)) +geom_smooth(data = df2, aes(x = x1,y = y1), colour = "blue", method = "lm", se=FALSE) + geom_point(data = df1, aes(x = x1,y = y1, colour=clarity)) +geom_smooth(data = df1, aes(x = x1,y = y1), colour = "red", method = "lm", se=FALSE)
+p
+```
